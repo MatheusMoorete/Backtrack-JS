@@ -47,7 +47,16 @@
     "browser",
     "session-replay"
   ],
-  "license": "MIT",
+  "author": "Matheus Moorete",
+  "license": "SEE LICENSE IN LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MatheusMoorete/Backtrack-JS.git"
+  },
+  "bugs": {
+    "url": "https://github.com/MatheusMoorete/Backtrack-JS/issues"
+  },
+  "homepage": "https://github.com/MatheusMoorete/Backtrack-JS#readme",
   "dependencies": {
     "@rrweb/record": "^2.1.6"
   },
