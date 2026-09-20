@@ -82,13 +82,26 @@ export class BacktrackWidget {
     }
   }
 
+  private isCheckingViewer = false;
   private async checkViewerOnline(): Promise<boolean> {
+    if (this.isCheckingViewer) return this.isViewerOnline;
+    this.isCheckingViewer = true;
     const viewerUrl = this.options.defaultViewerUrl || DEFAULT_VIEWER_URL;
     try {
-      const res = await fetch(viewerUrl, { method: 'GET', mode: 'no-cors' });
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 1200);
+      const res = await fetch(viewerUrl, {
+        method: 'GET',
+        mode: 'no-cors',
+        signal: controller.signal,
+        cache: 'no-store'
+      });
+      clearTimeout(timeout);
       return res.type === 'opaque' || res.ok || res.status === 200;
     } catch {
       return false;
+    } finally {
+      this.isCheckingViewer = false;
     }
   }
 
@@ -99,7 +112,7 @@ export class BacktrackWidget {
       if (this.isOpen) {
         this.isViewerOnline = await this.checkViewerOnline();
       }
-      this.render();
+      this.updateDomValues();
     } catch {
       // Ignora erro
     }
@@ -243,11 +256,23 @@ export class BacktrackWidget {
     }
 
     let received = false;
+    let timer: ReturnType<typeof setInterval> | null = null;
+
+    const cleanup = () => {
+      if (timer) {
+        clearInterval(timer);
+        timer = null;
+      }
+      window.removeEventListener('message', onMessage);
+    };
 
     const sendPayload = () => {
+      if (received || win.closed) {
+        cleanup();
+        return;
+      }
       try {
         win.postMessage({ type: 'LOAD_BACKTRACK_ARTIFACT', artifact }, '*');
-        win.postMessage({ type: 'LOAD_FFR_ARTIFACT', artifact }, '*');
       } catch {
         // Ignora
       }
@@ -258,7 +283,7 @@ export class BacktrackWidget {
         sendPayload();
       } else if (event.data?.type === 'BACKTRACK_ARTIFACT_RECEIVED' || event.data?.type === 'FFR_ARTIFACT_RECEIVED') {
         received = true;
-        window.removeEventListener('message', onMessage);
+        cleanup();
       }
     };
 
@@ -266,14 +291,13 @@ export class BacktrackWidget {
     sendPayload();
 
     const start = Date.now();
-    const timer = setInterval(() => {
+    timer = setInterval(() => {
       if (received || win.closed || Date.now() - start > 4000) {
-        clearInterval(timer);
-        window.removeEventListener('message', onMessage);
+        cleanup();
       } else {
         sendPayload();
       }
-    }, 150);
+    }, 250);
   }
 
   private toggleOpen(): void {
@@ -282,7 +306,7 @@ export class BacktrackWidget {
     if (this.isOpen) {
       this.updateData();
       if (!this.pollTimer) {
-        this.pollTimer = setInterval(() => this.updateData(), 3000);
+        this.pollTimer = setInterval(() => this.updateData(), 5000);
       }
     } else {
       if (this.pollTimer) {
@@ -406,63 +430,10 @@ export class BacktrackWidget {
               </div>
 
               <!-- Lista de Incidentes -->
-              <div class="backtrack-section-title">Gravações Salvas (${incidentCount})</div>
-              ${
-                incidentCount === 0
-                  ? `<div class="backtrack-empty-state">Nenhum incidente salvo nesta sessão.</div>`
-                  : this.incidents
-                      .slice(0, 8)
-                      .map((inc) => {
-                        const dateStr = new Date(inc.startedAt).toLocaleTimeString('pt-BR');
-                        const durationSec = inc.finalizedAt
-                          ? Math.max(1, Math.round((inc.finalizedAt - inc.startedAt) / 1000))
-                          : 0;
-                        return `
-                        <div class="backtrack-incident-card">
-                          <div>
-                            <div class="backtrack-incident-header-text">
-                              <span>${dateStr}</span>
-                              <span class="backtrack-duration-pill">${durationSec}s</span>
-                            </div>
-                            <div class="backtrack-incident-sub-id">${inc.id.substring(0, 16)}...</div>
-                          </div>
-                          <div class="backtrack-incident-actions">
-                            <button type="button" class="backtrack-action-btn backtrack-btn-view" data-view-id="${inc.id}" title="Abrir no visualizador offline">
-                              Visualizar
-                            </button>
-                            <div class="backtrack-menu-wrapper">
-                              <button
-                                type="button"
-                                class="backtrack-menu-trigger ${this.openMenuId === inc.id ? 'is-active' : ''}"
-                                data-menu-toggle-id="${inc.id}"
-                                title="Mais opções"
-                                aria-label="Mais opções"
-                              >
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                                  <circle cx="12" cy="5" r="2.2" />
-                                  <circle cx="12" cy="12" r="2.2" />
-                                  <circle cx="12" cy="19" r="2.2" />
-                                </svg>
-                              </button>
-                              <div class="backtrack-dropdown-menu ${this.openMenuId === inc.id ? 'is-open' : ''}" id="menu-${inc.id}">
-                                <button type="button" class="backtrack-dropdown-item" data-download-id="${inc.id}">
-                                  <span>⬇ Baixar (.ffr.json)</span>
-                                </button>
-                                <button type="button" class="backtrack-dropdown-item" data-copy-id="${inc.id}">
-                                  <span>📋 Copiar Markdown</span>
-                                </button>
-                                <div class="backtrack-dropdown-divider"></div>
-                                <button type="button" class="backtrack-dropdown-item is-danger" data-delete-id="${inc.id}">
-                                  <span>✕ Excluir</span>
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      `;
-                      })
-                      .join('')
-              }
+              <div class="backtrack-section-title" id="backtrack-saved-count-title">Gravações Salvas (${incidentCount})</div>
+              <div id="backtrack-incident-list-container">
+                ${this.renderIncidentsHtml()}
+              </div>
             </div>
           </div>
         `
@@ -472,6 +443,213 @@ export class BacktrackWidget {
     `;
 
     this.attachEventListeners();
+  }
+
+  private renderIncidentsHtml(): string {
+    const incidentCount = this.incidents.length;
+    if (incidentCount === 0) {
+      return `<div class="backtrack-empty-state">Nenhum incidente salvo nesta sessão.</div>`;
+    }
+
+    return this.incidents
+      .slice(0, 8)
+      .map((inc) => {
+        const dateStr = new Date(inc.startedAt).toLocaleTimeString('pt-BR');
+        const durationSec = inc.finalizedAt
+          ? Math.max(1, Math.round((inc.finalizedAt - inc.startedAt) / 1000))
+          : 0;
+        return `
+        <div class="backtrack-incident-card">
+          <div>
+            <div class="backtrack-incident-header-text">
+              <span>${dateStr}</span>
+              <span class="backtrack-duration-pill">${durationSec}s</span>
+            </div>
+            <div class="backtrack-incident-sub-id">${inc.id.substring(0, 16)}...</div>
+          </div>
+          <div class="backtrack-incident-actions">
+            <button type="button" class="backtrack-action-btn backtrack-btn-view" data-view-id="${inc.id}" title="Abrir no visualizador offline">
+              Visualizar
+            </button>
+            <div class="backtrack-menu-wrapper">
+              <button
+                type="button"
+                class="backtrack-menu-trigger ${this.openMenuId === inc.id ? 'is-active' : ''}"
+                data-menu-toggle-id="${inc.id}"
+                title="Mais opções"
+                aria-label="Mais opções"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                  <circle cx="12" cy="5" r="2.2" />
+                  <circle cx="12" cy="12" r="2.2" />
+                  <circle cx="12" cy="19" r="2.2" />
+                </svg>
+              </button>
+              <div class="backtrack-dropdown-menu ${this.openMenuId === inc.id ? 'is-open' : ''}" id="menu-${inc.id}">
+                <button type="button" class="backtrack-dropdown-item" data-download-id="${inc.id}">
+                  <span>⬇ Baixar (.ffr.json)</span>
+                </button>
+                <button type="button" class="backtrack-dropdown-item" data-copy-id="${inc.id}">
+                  <span>📋 Copiar Markdown</span>
+                </button>
+                <div class="backtrack-dropdown-divider"></div>
+                <button type="button" class="backtrack-dropdown-item is-danger" data-delete-id="${inc.id}">
+                  <span>✕ Excluir</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+      })
+      .join('');
+  }
+
+  private updateDomValues(): void {
+    if (!this.shadow) return;
+
+    const panel = this.shadow.querySelector('.backtrack-panel');
+    if (this.isOpen && !panel) {
+      this.render();
+      return;
+    }
+
+    if (!this.isOpen && panel) {
+      this.render();
+      return;
+    }
+
+    // Atualiza status dot do launcher
+    const statusClass =
+      this.health?.state === 'recording'
+        ? 'backtrack-status-recording'
+        : this.health?.state === 'degraded'
+        ? 'backtrack-status-degraded'
+        : 'backtrack-status-idle';
+    const launcherDot = this.shadow.querySelector('.backtrack-launcher-status-dot');
+    if (launcherDot) {
+      launcherDot.className = `backtrack-launcher-status-dot ${statusClass}`;
+    }
+
+    // Atualiza badge de contagem no launcher
+    const launcherBtn = this.shadow.getElementById('btn-launcher');
+    if (launcherBtn) {
+      let badge = launcherBtn.querySelector('.backtrack-incident-badge-count');
+      if (this.incidents.length > 0) {
+        if (!badge) {
+          badge = document.createElement('span');
+          badge.className = 'backtrack-incident-badge-count';
+          launcherBtn.appendChild(badge);
+        }
+        badge.textContent = String(this.incidents.length);
+      } else if (badge) {
+        badge.remove();
+      }
+    }
+
+    // Se o painel está aberto, atualiza texto e dot sem recriar o DOM
+    if (this.isOpen && panel) {
+      const statusWrap = this.shadow.querySelector('.backtrack-viewer-status-wrap');
+      if (statusWrap) {
+        statusWrap.innerHTML = `
+          <span class="backtrack-status-dot ${this.isViewerOnline ? 'backtrack-status-online' : 'backtrack-status-offline'}"></span>
+          ${this.isViewerOnline ? 'Visualizador online' : 'Visualizador offline'} • ${this.formatBytes(this.health?.storageBytes ?? 0)}
+        `;
+      }
+
+      const titleCount = this.shadow.getElementById('backtrack-saved-count-title');
+      if (titleCount) {
+        titleCount.textContent = `Gravações Salvas (${this.incidents.length})`;
+      }
+
+      const listContainer = this.shadow.getElementById('backtrack-incident-list-container');
+      if (listContainer) {
+        const currentIds = Array.from(
+          listContainer.querySelectorAll('[data-view-id]')
+        )
+          .map((el) => el.getAttribute('data-view-id'))
+          .join(',');
+        const newIds = this.incidents
+          .slice(0, 8)
+          .map((inc) => inc.id)
+          .join(',');
+
+        if (currentIds !== newIds) {
+          listContainer.innerHTML = this.renderIncidentsHtml();
+          this.attachIncidentListeners();
+        }
+      }
+    }
+  }
+
+  private updateMenuVisibility(): void {
+    if (!this.shadow) return;
+    this.shadow.querySelectorAll('.backtrack-dropdown-menu').forEach((menu) => {
+      const menuId = menu.id.replace('menu-', '');
+      if (menuId === this.openMenuId) {
+        menu.classList.add('is-open');
+      } else {
+        menu.classList.remove('is-open');
+      }
+    });
+    this.shadow.querySelectorAll('.backtrack-menu-trigger').forEach((trigger) => {
+      const triggerId = trigger.getAttribute('data-menu-toggle-id');
+      if (triggerId === this.openMenuId) {
+        trigger.classList.add('is-active');
+      } else {
+        trigger.classList.remove('is-active');
+      }
+    });
+  }
+
+  private attachIncidentListeners(): void {
+    if (!this.shadow) return;
+
+    this.shadow.querySelectorAll('[data-view-id]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const id = (e.currentTarget as HTMLElement).getAttribute('data-view-id');
+        if (id) this.handleViewIncident(id);
+      });
+    });
+
+    this.shadow.querySelectorAll('[data-menu-toggle-id]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = (e.currentTarget as HTMLElement).getAttribute('data-menu-toggle-id');
+        this.openMenuId = this.openMenuId === id ? null : id;
+        this.updateMenuVisibility();
+      });
+    });
+
+    this.shadow.querySelectorAll('[data-download-id]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = (e.currentTarget as HTMLElement).getAttribute('data-download-id');
+        this.openMenuId = null;
+        this.updateMenuVisibility();
+        if (id) this.handleDownloadIncident(id);
+      });
+    });
+
+    this.shadow.querySelectorAll('[data-copy-id]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = (e.currentTarget as HTMLElement).getAttribute('data-copy-id');
+        this.openMenuId = null;
+        this.updateMenuVisibility();
+        if (id) this.handleCopyMarkdown(id);
+      });
+    });
+
+    this.shadow.querySelectorAll('[data-delete-id]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = (e.currentTarget as HTMLElement).getAttribute('data-delete-id');
+        this.openMenuId = null;
+        this.updateMenuVisibility();
+        if (id) this.handleDeleteIncident(id);
+      });
+    });
   }
 
   private attachEventListeners(): void {
@@ -508,56 +686,14 @@ export class BacktrackWidget {
         this.handleClear();
       });
 
-      // Binds de botões de incidentes
-      this.shadow.querySelectorAll('[data-view-id]').forEach((btn) => {
-        btn.addEventListener('click', (e) => {
-          const id = (e.currentTarget as HTMLElement).getAttribute('data-view-id');
-          if (id) this.handleViewIncident(id);
-        });
-      });
-
-      this.shadow.querySelectorAll('[data-menu-toggle-id]').forEach((btn) => {
-        btn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const id = (e.currentTarget as HTMLElement).getAttribute('data-menu-toggle-id');
-          this.openMenuId = this.openMenuId === id ? null : id;
-          this.render();
-        });
-      });
-
-      this.shadow.querySelectorAll('[data-download-id]').forEach((btn) => {
-        btn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const id = (e.currentTarget as HTMLElement).getAttribute('data-download-id');
-          this.openMenuId = null;
-          if (id) this.handleDownloadIncident(id);
-        });
-      });
-
-      this.shadow.querySelectorAll('[data-copy-id]').forEach((btn) => {
-        btn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const id = (e.currentTarget as HTMLElement).getAttribute('data-copy-id');
-          this.openMenuId = null;
-          if (id) this.handleCopyMarkdown(id);
-        });
-      });
-
-      this.shadow.querySelectorAll('[data-delete-id]').forEach((btn) => {
-        btn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const id = (e.currentTarget as HTMLElement).getAttribute('data-delete-id');
-          this.openMenuId = null;
-          if (id) this.handleDeleteIncident(id);
-        });
-      });
+      this.attachIncidentListeners();
 
       this.shadow.querySelector('.backtrack-panel')?.addEventListener('click', (e) => {
         if (this.openMenuId) {
           const target = e.target as HTMLElement | null;
           if (!target?.closest('.backtrack-menu-wrapper')) {
             this.openMenuId = null;
-            this.render();
+            this.updateMenuVisibility();
           }
         }
       });

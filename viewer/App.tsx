@@ -46,19 +46,36 @@ export const App: React.FC = () => {
     // 3. Listener para carregar incidentes automaticamente via postMessage
     const handleMessage = (event: MessageEvent) => {
       if ((event.data?.type === 'LOAD_BACKTRACK_ARTIFACT' || event.data?.type === 'LOAD_FFR_ARTIFACT') && event.data?.artifact) {
-        const validation = validateFlightRecorderArtifact(event.data.artifact);
-        if (validation.success) {
-          handleArtifactLoaded(validation.data);
+        const incoming = event.data.artifact;
+
+        // Responde de volta imediatamente para cancelar o timer de reenvio no widget
+        if (event.source && 'postMessage' in event.source) {
           try {
-            sessionStorage.setItem('backtrack_active_artifact', JSON.stringify(validation.data));
-          } catch {
-            // Ignora erro de quota
-          }
-          if (event.source && 'postMessage' in event.source) {
             (event.source as Window).postMessage({ type: 'BACKTRACK_ARTIFACT_RECEIVED' }, '*');
             (event.source as Window).postMessage({ type: 'FFR_ARTIFACT_RECEIVED' }, '*');
+          } catch {
+            // Ignora
           }
         }
+
+        // Se o mesmo artefato já está carregado, não recarrega para evitar piscar o player
+        setArtifact((prev) => {
+          if (prev?.incident?.id === incoming.incident?.id) {
+            return prev;
+          }
+          const validation = validateFlightRecorderArtifact(incoming);
+          if (validation.success) {
+            try {
+              sessionStorage.setItem('backtrack_active_artifact', JSON.stringify(validation.data));
+            } catch {
+              // Ignora erro de quota
+            }
+            setCurrentTimeMs(validation.data.incident.startedAt);
+            setMobilePane('replay');
+            return validation.data;
+          }
+          return prev;
+        });
       }
     };
 

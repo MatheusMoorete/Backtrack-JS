@@ -57,7 +57,12 @@ export const ReplayPlayer: React.FC<ReplayPlayerProps> = ({
     const updateSize = () => {
       const rect = el.getBoundingClientRect();
       if (rect.width > 0 && rect.height > 0) {
-        setContainerSize({ width: rect.width, height: rect.height });
+        setContainerSize((prev) => {
+          if (Math.abs(prev.width - rect.width) < 2 && Math.abs(prev.height - rect.height) < 2) {
+            return prev;
+          }
+          return { width: Math.round(rect.width), height: Math.round(rect.height) };
+        });
       }
     };
 
