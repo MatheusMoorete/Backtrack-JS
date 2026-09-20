@@ -1,0 +1,423 @@
+import type { FlightRecorder, WidgetOptions } from '../types/options';
+import type { IncidentSummary } from '../types/incident';
+import type { RecorderHealth } from '../types/health';
+import type { FlightRecorderArtifactV1 } from '../types/artifact';
+import { WIDGET_CSS } from './styles';
+
+export const DEFAULT_VIEWER_URL = 'http://localhost:5173';
+
+export class BacktrackWidget {
+  private recorder: FlightRecorder;
+  private options: WidgetOptions;
+  private container: HTMLElement | null = null;
+  private shadow: ShadowRoot | null = null;
+
+  private isOpen = false;
+  private selectedDurationSeconds = 60; // 1m default
+  private isCapturing = false;
+  private isViewerOnline = false;
+  private incidents: IncidentSummary[] = [];
+  private health: RecorderHealth | null = null;
+  private alertMessage: string | null = null;
+
+  private pollTimer: ReturnType<typeof setInterval> | null = null;
+
+  constructor(recorder: FlightRecorder, options?: WidgetOptions) {
+    this.recorder = recorder;
+    this.options = {
+      position: options?.position ?? 'bottom-left',
+      defaultViewerUrl: options?.defaultViewerUrl ?? DEFAULT_VIEWER_URL,
+      zIndex: options?.zIndex ?? 999999
+    };
+  }
+
+  public mount(): void {
+    if (typeof document === 'undefined' || this.container) return;
+
+    // Cria elemento hospedeiro com Shadow DOM para isolamento total de CSS
+    const host = document.createElement('div');
+    host.id = '__backtrack_widget_host__';
+    this.applyHostPosition(host);
+
+    this.shadow = host.attachShadow({ mode: 'open' });
+    this.container = host;
+    document.body.appendChild(host);
+
+    this.render();
+    this.updateData();
+  }
+
+  public unmount(): void {
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+    }
+    if (this.container && this.container.parentNode) {
+      this.container.parentNode.removeChild(this.container);
+    }
+    this.container = null;
+    this.shadow = null;
+  }
+
+  private applyHostPosition(host: HTMLElement): void {
+    const pos = this.options.position || 'bottom-left';
+    host.style.position = 'fixed';
+    host.style.zIndex = String(this.options.zIndex || 999999);
+
+    if (pos === 'bottom-left') {
+      host.style.bottom = '16px';
+      host.style.left = '16px';
+    } else if (pos === 'bottom-right') {
+      host.style.bottom = '16px';
+      host.style.right = '16px';
+    } else if (pos === 'top-left') {
+      host.style.top = '16px';
+      host.style.left = '16px';
+    } else if (pos === 'top-right') {
+      host.style.top = '16px';
+      host.style.right = '16px';
+    }
+  }
+
+  private async checkViewerOnline(): Promise<boolean> {
+    const viewerUrl = this.options.defaultViewerUrl || DEFAULT_VIEWER_URL;
+    try {
+      const res = await fetch(viewerUrl, { method: 'GET', mode: 'no-cors' });
+      return res.type === 'opaque' || res.ok || res.status === 200;
+    } catch {
+      return false;
+    }
+  }
+
+  private async updateData(): Promise<void> {
+    try {
+      this.health = this.recorder.getHealth();
+      this.incidents = await this.recorder.listIncidents();
+      if (this.isOpen) {
+        this.isViewerOnline = await this.checkViewerOnline();
+      }
+      this.render();
+    } catch {
+      // Ignora erro
+    }
+  }
+
+  private async handleCapture(): Promise<void> {
+    if (this.isCapturing) return;
+    this.isCapturing = true;
+    this.render();
+
+    try {
+      const id = await this.recorder.capture('Captura manual', this.selectedDurationSeconds);
+      this.alertMessage = `Incidente ${id.substring(0, 14)}... gravado!`;
+      await this.updateData();
+    } catch (err) {
+      this.alertMessage = 'Falha ao gravar incidente.';
+    } finally {
+      this.isCapturing = false;
+      this.render();
+      setTimeout(() => {
+        this.alertMessage = null;
+        this.render();
+      }, 4000);
+    }
+  }
+
+  private async handleClear(): Promise<void> {
+    if (!confirm('Deseja limpar todos os dados de gravação e incidentes locais?')) return;
+    try {
+      await this.recorder.clear();
+      this.alertMessage = 'Todos os dados locais foram limpos.';
+      await this.updateData();
+    } catch {
+      this.alertMessage = 'Erro ao limpar dados.';
+    } finally {
+      setTimeout(() => {
+        this.alertMessage = null;
+        this.render();
+      }, 3000);
+    }
+  }
+
+  private async handleViewIncident(incidentId: string): Promise<void> {
+    try {
+      const artifact = await this.recorder.exportIncident(incidentId);
+      this.openInViewer(artifact);
+    } catch {
+      alert('Não foi possível carregar o artefato do incidente.');
+    }
+  }
+
+  private async handleDeleteIncident(incidentId: string): Promise<void> {
+    try {
+      await this.recorder.deleteIncident(incidentId);
+      await this.updateData();
+    } catch {
+      alert('Falha ao excluir incidente.');
+    }
+  }
+
+  private openInViewer(artifact: FlightRecorderArtifactV1): void {
+    const viewerUrl = this.options.defaultViewerUrl || DEFAULT_VIEWER_URL;
+    const win = window.open(viewerUrl, 'backtrack_viewer');
+    if (!win) {
+      alert('Pop-up bloqueado. Permita pop-ups para abrir o visualizador.');
+      return;
+    }
+
+    try {
+      win.focus();
+    } catch {
+      // Noop
+    }
+
+    let received = false;
+
+    const sendPayload = () => {
+      try {
+        win.postMessage({ type: 'LOAD_BACKTRACK_ARTIFACT', artifact }, '*');
+        win.postMessage({ type: 'LOAD_FFR_ARTIFACT', artifact }, '*');
+      } catch {
+        // Ignora
+      }
+    };
+
+    const onMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'BACKTRACK_VIEWER_READY' || event.data?.type === 'FFR_VIEWER_READY') {
+        sendPayload();
+      } else if (event.data?.type === 'BACKTRACK_ARTIFACT_RECEIVED' || event.data?.type === 'FFR_ARTIFACT_RECEIVED') {
+        received = true;
+        window.removeEventListener('message', onMessage);
+      }
+    };
+
+    window.addEventListener('message', onMessage);
+    sendPayload();
+
+    const start = Date.now();
+    const timer = setInterval(() => {
+      if (received || win.closed || Date.now() - start > 4000) {
+        clearInterval(timer);
+        window.removeEventListener('message', onMessage);
+      } else {
+        sendPayload();
+      }
+    }, 150);
+  }
+
+  private toggleOpen(): void {
+    this.isOpen = !this.isOpen;
+    if (this.isOpen) {
+      this.updateData();
+      if (!this.pollTimer) {
+        this.pollTimer = setInterval(() => this.updateData(), 3000);
+      }
+    } else {
+      if (this.pollTimer) {
+        clearInterval(this.pollTimer);
+        this.pollTimer = null;
+      }
+    }
+    this.render();
+  }
+
+  private formatBytes(bytes: number): string {
+    if (bytes === 0) return '0 KB';
+    const kb = bytes / 1024;
+    if (kb < 1024) return `${kb.toFixed(1)} KB`;
+    return `${(kb / 1024).toFixed(1)} MB`;
+  }
+
+  private render(): void {
+    if (!this.shadow) return;
+
+    const statusClass =
+      this.health?.state === 'recording'
+        ? 'backtrack-status-recording'
+        : this.health?.state === 'degraded'
+        ? 'backtrack-status-degraded'
+        : 'backtrack-status-idle';
+
+    const incidentCount = this.incidents.length;
+
+    this.shadow.innerHTML = `
+      <style>${WIDGET_CSS}</style>
+      <div class="backtrack-root">
+        <!-- Launcher Button -->
+        <button
+          type="button"
+          class="backtrack-launcher-btn"
+          id="btn-launcher"
+          title="Backtrack — Gravação e Depuração de Sessão"
+          aria-label="Abrir painel do Backtrack"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+            <polyline points="3 3 3 8 8 8" />
+            <polygon points="10 9 15 12 10 15 10 9" fill="currentColor" stroke="none" />
+          </svg>
+          <span class="backtrack-launcher-status-dot ${statusClass}"></span>
+          ${incidentCount > 0 ? `<span class="backtrack-incident-badge-count">${incidentCount}</span>` : ''}
+        </button>
+
+        <!-- Slide-over Drawer Panel -->
+        ${
+          this.isOpen
+            ? `
+          <div class="backtrack-panel" role="dialog" aria-labelledby="backtrack-title">
+            <div class="backtrack-panel-header">
+              <div>
+                <div class="backtrack-panel-title" id="backtrack-title">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                    <polyline points="3 3 3 8 8 8" />
+                    <polygon points="10 9 15 12 10 15 10 9" fill="currentColor" stroke="none" />
+                  </svg>
+                  Backtrack
+                </div>
+                <div class="backtrack-panel-subtitle">
+                  <span class="backtrack-viewer-status-wrap">
+                    <span class="backtrack-status-dot ${this.isViewerOnline ? 'backtrack-status-online' : 'backtrack-status-offline'}"></span>
+                    ${this.isViewerOnline ? 'Visualizador online' : 'Visualizador offline'} • ${this.formatBytes(this.health?.storageBytes ?? 0)}
+                  </span>
+                </div>
+              </div>
+              <button type="button" class="backtrack-close-btn" id="btn-close" aria-label="Fechar painel">×</button>
+            </div>
+
+            <div class="backtrack-panel-body">
+              ${this.alertMessage ? `<div class="backtrack-alert">${this.alertMessage}</div>` : ''}
+
+              <!-- Duração -->
+              <div class="backtrack-duration-section">
+                <div class="backtrack-section-title">Janela de Gravação</div>
+                <div class="backtrack-duration-group">
+                  <button
+                    type="button"
+                    class="backtrack-duration-btn ${this.selectedDurationSeconds === 60 ? 'is-selected' : ''}"
+                    id="btn-duration-60"
+                  >
+                    1 min
+                  </button>
+                  <button
+                    type="button"
+                    class="backtrack-duration-btn ${this.selectedDurationSeconds === 300 ? 'is-selected' : ''}"
+                    id="btn-duration-300"
+                  >
+                    5 min
+                  </button>
+                </div>
+              </div>
+
+              <!-- Ações -->
+              <div class="backtrack-actions-row">
+                <button
+                  type="button"
+                  class="backtrack-btn-save"
+                  id="btn-save"
+                  ${this.isCapturing ? 'disabled' : ''}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                    <polyline points="17 21 17 13 7 13 7 21" />
+                    <polyline points="7 3 7 8 15 8" />
+                  </svg>
+                  ${this.isCapturing ? 'Gravando...' : 'Gravar incidente'}
+                </button>
+                <button type="button" class="backtrack-btn-clear" id="btn-clear" title="Limpar incidentes e buffer local">
+                  Limpar
+                </button>
+              </div>
+
+              <!-- Lista de Incidentes -->
+              <div class="backtrack-section-title">Gravações Salvas (${incidentCount})</div>
+              ${
+                incidentCount === 0
+                  ? `<div class="backtrack-empty-state">Nenhum incidente salvo nesta sessão.</div>`
+                  : this.incidents
+                      .slice(0, 8)
+                      .map((inc) => {
+                        const dateStr = new Date(inc.startedAt).toLocaleTimeString('pt-BR');
+                        const durationSec = inc.finalizedAt
+                          ? Math.max(1, Math.round((inc.finalizedAt - inc.startedAt) / 1000))
+                          : 0;
+                        return `
+                        <div class="backtrack-incident-card">
+                          <div>
+                            <div class="backtrack-incident-header-text">
+                              <span>${dateStr}</span>
+                              <span class="backtrack-duration-pill">${durationSec}s</span>
+                            </div>
+                            <div class="backtrack-incident-sub-id">${inc.id.substring(0, 18)}...</div>
+                          </div>
+                          <div class="backtrack-incident-actions">
+                            <button type="button" class="backtrack-action-btn backtrack-btn-view" data-view-id="${inc.id}">
+                              Ver
+                            </button>
+                            <button type="button" class="backtrack-action-btn backtrack-btn-delete" data-delete-id="${inc.id}" title="Excluir gravação">
+                              ✕
+                            </button>
+                          </div>
+                        </div>
+                      `;
+                      })
+                      .join('')
+              }
+            </div>
+          </div>
+        `
+            : ''
+        }
+      </div>
+    `;
+
+    this.attachEventListeners();
+  }
+
+  private attachEventListeners(): void {
+    if (!this.shadow) return;
+
+    this.shadow.getElementById('btn-launcher')?.addEventListener('click', () => {
+      this.toggleOpen();
+    });
+
+    if (this.isOpen) {
+      this.shadow.getElementById('btn-close')?.addEventListener('click', () => {
+        this.toggleOpen();
+      });
+
+      this.shadow.getElementById('btn-duration-60')?.addEventListener('click', () => {
+        this.selectedDurationSeconds = 60;
+        this.render();
+      });
+
+      this.shadow.getElementById('btn-duration-300')?.addEventListener('click', () => {
+        this.selectedDurationSeconds = 300;
+        this.render();
+      });
+
+      this.shadow.getElementById('btn-save')?.addEventListener('click', () => {
+        this.handleCapture();
+      });
+
+      this.shadow.getElementById('btn-clear')?.addEventListener('click', () => {
+        this.handleClear();
+      });
+
+      // Binds de botões de incidentes
+      this.shadow.querySelectorAll('[data-view-id]').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          const id = (e.currentTarget as HTMLElement).getAttribute('data-view-id');
+          if (id) this.handleViewIncident(id);
+        });
+      });
+
+      this.shadow.querySelectorAll('[data-delete-id]').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          const id = (e.currentTarget as HTMLElement).getAttribute('data-delete-id');
+          if (id) this.handleDeleteIncident(id);
+        });
+      });
+    }
+  }
+}

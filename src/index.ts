@@ -4,6 +4,8 @@ export * from './core/state-machine';
 export * from './core/flight-recorder';
 export * from './storage';
 export * from './capturers';
+export * from './widget/widget';
+export * from './capturers/route-matcher';
 
 // Canonical Backtrack Exports and Aliases
 import { FlightRecorderImpl, createFlightRecorder } from './core/flight-recorder';

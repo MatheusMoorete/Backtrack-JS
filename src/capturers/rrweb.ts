@@ -3,6 +3,8 @@ import type { BatchWriter } from '../storage/batch-writer';
 import type { PrivacyOptions } from '../types/options';
 import type { RrwebEvent } from '../types/chunk';
 
+import { matchesSensitiveRoute } from './route-matcher';
+
 export interface RrwebCapturerConfig {
   privacy?: PrivacyOptions;
   checkoutEveryNms?: number; // default 60000ms (60s)
@@ -32,6 +34,23 @@ export class RrwebCapturer {
 
     try {
       const privacy = this.config.privacy || {};
+      const blockSelector = [
+        privacy.blockSelector,
+        '.backtrack-block',
+        '.ffr-block',
+        '[data-backtrack-block]'
+      ]
+        .filter(Boolean)
+        .join(', ');
+
+      const maskTextSelector = [
+        privacy.maskTextSelector,
+        '.backtrack-mask',
+        '.ffr-mask',
+        '[data-backtrack-mask]'
+      ]
+        .filter(Boolean)
+        .join(', ');
 
       this.stopRecordFn = record({
         emit: (event: unknown, isCheckout?: boolean) => {
@@ -49,11 +68,22 @@ export class RrwebCapturer {
           }
         },
         maskAllInputs: privacy.maskAllInputs !== false,
-        maskTextSelector: privacy.maskTextSelector,
-        blockSelector: privacy.blockSelector,
-        blockClass: 'ffr-block',
-        ignoreClass: 'ffr-ignore',
-        maskTextClass: 'ffr-mask',
+        maskTextSelector: maskTextSelector || undefined,
+        blockSelector: blockSelector || undefined,
+        blockClass: 'backtrack-block',
+        ignoreClass: 'backtrack-ignore',
+        maskTextClass: 'backtrack-mask',
+        maskTextFn: (text: string) => {
+          const isSensitive =
+            privacy.maskAllText ||
+            (typeof window !== 'undefined' &&
+              matchesSensitiveRoute(window.location.pathname, privacy.sensitiveRoutes));
+
+          if (isSensitive) {
+            return text.replace(/[^\s]/g, '*');
+          }
+          return text;
+        },
         checkoutEveryNms: this.config.checkoutEveryNms ?? 30000,
         sampling: {
           mousemove: 50, // amostrado

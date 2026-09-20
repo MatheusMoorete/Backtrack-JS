@@ -11,6 +11,8 @@ import { NetworkCapturer } from '../capturers/network';
 import { NavigationCapturer } from '../capturers/navigation';
 import { RrwebCapturer } from '../capturers/rrweb';
 
+import { BacktrackWidget } from '../widget/widget';
+
 import type {
   FlightRecorder,
   FlightRecorderOptions,
@@ -21,12 +23,15 @@ import type { IncidentSummary } from '../types/incident';
 import type { EnvironmentMetadata, FlightRecorderArtifactV1 } from '../types/artifact';
 
 export class FlightRecorderImpl implements FlightRecorder {
+  private static activeInstance: FlightRecorderImpl | null = null;
+
   private options: FlightRecorderOptions;
   private stateMachine: RecorderStateMachine;
   private db: FlightRecorderDB;
   private writer: BatchWriter | null = null;
   private retention: RetentionEngine;
   private incidentManager: IncidentManager | null = null;
+  private widget: BacktrackWidget | null = null;
 
   private consoleCapturer: ConsoleCapturer | null = null;
   private errorCapturer: ErrorCapturer | null = null;
@@ -45,13 +50,20 @@ export class FlightRecorderImpl implements FlightRecorder {
       afterErrorSeconds: options?.afterErrorSeconds ?? 15,
       maxStorageMb: options?.maxStorageMb ?? 50,
       captureHttpStatus: options?.captureHttpStatus ?? [500, 502, 503, 504],
+      showWidget: options?.showWidget ?? false,
+      widgetOptions: options?.widgetOptions,
+      metadata: options?.metadata,
+      recorderVersion: options?.recorderVersion,
+      ignoredUrls: options?.ignoredUrls,
       privacy: {
         maskAllInputs: options?.privacy?.maskAllInputs ?? true,
         maskAllText: options?.privacy?.maskAllText ?? false,
         blockMedia: options?.privacy?.blockMedia ?? true,
         blockSelector: options?.privacy?.blockSelector,
         maskTextSelector: options?.privacy?.maskTextSelector,
-        sanitizeUrl: options?.privacy?.sanitizeUrl
+        sanitizeUrl: options?.privacy?.sanitizeUrl,
+        sensitiveRoutes: options?.privacy?.sensitiveRoutes,
+        autoMaskPII: options?.privacy?.autoMaskPII
       }
     };
 
@@ -61,6 +73,30 @@ export class FlightRecorderImpl implements FlightRecorder {
       bufferMinutes: this.options.bufferMinutes,
       maxStorageMb: this.options.maxStorageMb
     });
+  }
+
+  public static async init(
+    options?: FlightRecorderOptions,
+    customDb?: FlightRecorderDB
+  ): Promise<FlightRecorderImpl> {
+    if (FlightRecorderImpl.activeInstance) {
+      return FlightRecorderImpl.activeInstance;
+    }
+    const recorder = new FlightRecorderImpl(options, customDb);
+    await recorder.start();
+    FlightRecorderImpl.activeInstance = recorder;
+    return recorder;
+  }
+
+  public static resetInstance(): void {
+    if (FlightRecorderImpl.activeInstance) {
+      FlightRecorderImpl.activeInstance.stop();
+      FlightRecorderImpl.activeInstance = null;
+    }
+  }
+
+  public static getInstance(): FlightRecorderImpl | null {
+    return FlightRecorderImpl.activeInstance;
   }
 
   private nextSequence = (): number => {
@@ -193,6 +229,12 @@ export class FlightRecorderImpl implements FlightRecorder {
       }, 30000);
 
       this.updateStatsCache();
+
+      // Monta o widget flutuante caso showWidget esteja ativo
+      if (this.options.showWidget && typeof window !== 'undefined') {
+        this.widget = new BacktrackWidget(this, this.options.widgetOptions);
+        this.widget.mount();
+      }
     } catch (err) {
       this.stateMachine.transition({
         type: 'DEGRADE',
@@ -213,6 +255,15 @@ export class FlightRecorderImpl implements FlightRecorder {
 
   public stop(): void {
     if (this.stateMachine.getState() === 'stopped') return;
+
+    if (this.widget) {
+      this.widget.unmount();
+      this.widget = null;
+    }
+
+    if (FlightRecorderImpl.activeInstance === this) {
+      FlightRecorderImpl.activeInstance = null;
+    }
 
     if (this.retentionIntervalTimer) {
       clearInterval(this.retentionIntervalTimer);

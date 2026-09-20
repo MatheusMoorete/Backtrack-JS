@@ -8,6 +8,8 @@ export interface ErrorContext {
   [key: string]: unknown;
 }
 
+export type RouteMatcher = string | RegExp | ((pathname: string) => boolean);
+
 export interface PrivacyOptions {
   maskAllInputs?: boolean;
   maskAllText?: boolean;
@@ -15,6 +17,14 @@ export interface PrivacyOptions {
   blockSelector?: string;
   maskTextSelector?: string;
   sanitizeUrl?: (url: URL) => string;
+  sensitiveRoutes?: RouteMatcher[];
+  autoMaskPII?: boolean;
+}
+
+export interface WidgetOptions {
+  position?: 'bottom-left' | 'bottom-right' | 'top-left' | 'top-right';
+  defaultViewerUrl?: string;
+  zIndex?: number;
 }
 
 export interface FlightRecorderOptions {
@@ -26,6 +36,8 @@ export interface FlightRecorderOptions {
   privacy?: PrivacyOptions;
   metadata?: Partial<EnvironmentMetadata>;
   recorderVersion?: string;
+  showWidget?: boolean;
+  widgetOptions?: WidgetOptions;
 }
 
 export interface FlightRecorder {
