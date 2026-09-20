@@ -53,6 +53,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
     let networkCount = 0;
     let consoleCount = 0;
     let navigationCount = 0;
+    let performanceCount = 0;
     let allCount = 0;
 
     for (const e of events) {
@@ -67,6 +68,8 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
         consoleCount++;
       } else if (e.type === 'navigation') {
         navigationCount++;
+      } else if (e.type === 'performance') {
+        performanceCount++;
       }
     }
 
@@ -75,7 +78,8 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
       error: errorCount,
       network: networkCount,
       console: consoleCount,
-      navigation: navigationCount
+      navigation: navigationCount,
+      performance: performanceCount
     };
   }, [events]);
 
@@ -161,6 +165,8 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
         return <span className="timeline-badge badge-neutral">NAV</span>;
       case 'marker':
         return <span className="timeline-badge badge-neutral">MARKER</span>;
+      case 'performance':
+        return <span className="timeline-badge badge-warn">LONG TASK</span>;
       default:
         return <span className="timeline-badge badge-neutral">EVENT</span>;
     }
@@ -208,6 +214,12 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
             <strong>"{evt.label}"</strong> {evt.data ? JSON.stringify(evt.data) : ''}
           </span>
         );
+      case 'performance':
+        return (
+          <span className="timeline-summary-text" style={{ color: '#f59e0b' }}>
+            ⚠️ Congelamento de tela: <strong>{evt.durationMs}ms</strong> ({evt.details})
+          </span>
+        );
       default:
         return null;
     }
@@ -227,6 +239,12 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
         return (
           <span className="timeline-col-meta is-error">
             {evt.source}
+          </span>
+        );
+      case 'performance':
+        return (
+          <span className="timeline-col-meta" style={{ color: '#f59e0b' }}>
+            {evt.durationMs}ms
           </span>
         );
       case 'console':
@@ -276,12 +294,14 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
               ['error', 'Errors'],
               ['network', 'Network'],
               ['console', 'Console'],
-              ['navigation', 'Navigation']
+              ['navigation', 'Navigation'],
+              ['performance', 'Performance']
             ] as const
           ).map(([key, label]) => {
             const count = counts[key] ?? 0;
             const countClass =
               key === 'error' && count > 0 ? 'tab-count-error' :
+              key === 'performance' && count > 0 ? 'tab-count-error' :
               key === 'network' ? 'tab-count-network' : '';
             return (
               <button
@@ -368,6 +388,64 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
                         <div className="details-row">
                           <strong>Duração:</strong> {evt.durationMs}ms
                         </div>
+
+                        {/* Request Headers */}
+                        {evt.requestHeaders && (
+                          <details style={{ marginTop: '8px' }}>
+                            <summary style={{ cursor: 'pointer', fontSize: '11px', color: '#94a3b8' }}>
+                              Request Headers ({Object.keys(evt.requestHeaders).length})
+                            </summary>
+                            <pre className="details-code details-json-code" style={{ marginTop: '4px' }}>
+                              {JSON.stringify(evt.requestHeaders, null, 2)}
+                            </pre>
+                          </details>
+                        )}
+
+                        {/* Request Payload */}
+                        {evt.requestBody && (
+                          <div style={{ marginTop: '8px' }}>
+                            <div style={{ fontSize: '11px', fontWeight: 600, color: '#38bdf8', marginBottom: '4px' }}>
+                              Request Payload:
+                            </div>
+                            <pre className="details-code details-json-code" style={{ maxHeight: '180px', overflowY: 'auto' }}>
+                              {evt.requestBody}
+                            </pre>
+                          </div>
+                        )}
+
+                        {/* Response Headers */}
+                        {evt.responseHeaders && (
+                          <details style={{ marginTop: '8px' }}>
+                            <summary style={{ cursor: 'pointer', fontSize: '11px', color: '#94a3b8' }}>
+                              Response Headers ({Object.keys(evt.responseHeaders).length})
+                            </summary>
+                            <pre className="details-code details-json-code" style={{ marginTop: '4px' }}>
+                              {JSON.stringify(evt.responseHeaders, null, 2)}
+                            </pre>
+                          </details>
+                        )}
+
+                        {/* Response Body */}
+                        {evt.responseBody && (
+                          <div style={{ marginTop: '8px' }}>
+                            <div style={{ fontSize: '11px', fontWeight: 600, color: '#34d399', marginBottom: '4px' }}>
+                              Response Body:
+                            </div>
+                            <pre className="details-code details-json-code" style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                              {evt.responseBody}
+                            </pre>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {evt.type === 'performance' && (
+                      <div className="details-block">
+                        <div className="details-row"><strong>Métrica:</strong> Long Task (Thread principal travada)</div>
+                        <div className="details-row">
+                          <strong>Duração do travamento:</strong>{' '}
+                          <span style={{ color: '#f59e0b', fontWeight: 600 }}>{evt.durationMs}ms</span>
+                        </div>
+                        <div className="details-row"><strong>Detalhes:</strong> {evt.details || 'Script execution'}</div>
                       </div>
                     )}
                     {evt.type === 'console' && (

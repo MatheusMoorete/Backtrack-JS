@@ -4,3 +4,4 @@ export * from './errors';
 export * from './network';
 export * from './navigation';
 export * from './rrweb';
+export * from './performance';

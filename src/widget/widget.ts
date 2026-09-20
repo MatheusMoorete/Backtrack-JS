@@ -3,6 +3,8 @@ import type { IncidentSummary } from '../types/incident';
 import type { RecorderHealth } from '../types/health';
 import type { FlightRecorderArtifactV1 } from '../types/artifact';
 import { WIDGET_CSS } from './styles';
+import { ScreenAnnotator } from './annotator';
+import { formatIncidentMarkdown } from '../utils/markdown';
 
 export const DEFAULT_VIEWER_URL = 'http://localhost:5173';
 
@@ -146,6 +148,74 @@ export class BacktrackWidget {
     } catch {
       alert('Não foi possível carregar o artefato do incidente.');
     }
+  }
+
+  private async handleDownloadIncident(incidentId: string): Promise<void> {
+    try {
+      await this.recorder.exportIncident(incidentId);
+      this.alertMessage = 'Download do arquivo .ffr.json iniciado!';
+      this.render();
+      setTimeout(() => {
+        this.alertMessage = null;
+        this.render();
+      }, 3000);
+    } catch {
+      alert('Falha ao exportar incidente.');
+    }
+  }
+
+  private async handleCopyMarkdown(incidentId: string): Promise<void> {
+    try {
+      const artifact = await this.recorder.getArtifact(incidentId);
+      const md = formatIncidentMarkdown(artifact);
+      if (typeof navigator !== 'undefined' && navigator.clipboard) {
+        await navigator.clipboard.writeText(md);
+        this.alertMessage = 'Resumo Markdown copiado para o Jira/GitHub!';
+      } else {
+        this.alertMessage = 'Área de transferência indisponível.';
+      }
+      this.render();
+      setTimeout(() => {
+        this.alertMessage = null;
+        this.render();
+      }, 3500);
+    } catch {
+      alert('Falha ao gerar resumo Markdown.');
+    }
+  }
+
+  private handleAnnotate(): void {
+    this.isOpen = false;
+    this.render();
+
+    const annotator = new ScreenAnnotator();
+    annotator.open(async (result) => {
+      if (!result) {
+        this.isOpen = true;
+        this.render();
+        return;
+      }
+
+      try {
+        this.isCapturing = true;
+        this.isOpen = true;
+        this.alertMessage = 'Gravando incidente com anotação visual...';
+        this.render();
+
+        await this.recorder.capture('Anotação visual de bug na tela', this.selectedDurationSeconds);
+        await this.updateData();
+        this.alertMessage = 'Incidente com anotação visual gravado com sucesso!';
+      } catch (err) {
+        this.alertMessage = 'Falha ao salvar incidente com anotação.';
+      } finally {
+        this.isCapturing = false;
+        this.render();
+        setTimeout(() => {
+          this.alertMessage = null;
+          this.render();
+        }, 3500);
+      }
+    });
   }
 
   private async handleDeleteIncident(incidentId: string): Promise<void> {
@@ -322,7 +392,16 @@ export class BacktrackWidget {
                     <polyline points="17 21 17 13 7 13 7 21" />
                     <polyline points="7 3 7 8 15 8" />
                   </svg>
-                  ${this.isCapturing ? 'Gravando...' : 'Gravar incidente'}
+                  ${this.isCapturing ? 'Gravando...' : 'Gravar'}
+                </button>
+                <button
+                  type="button"
+                  class="backtrack-btn-annotate"
+                  id="btn-annotate"
+                  title="Congelar e desenhar na tela antes de gravar"
+                  ${this.isCapturing ? 'disabled' : ''}
+                >
+                  ✏️ Anotar
                 </button>
                 <button type="button" class="backtrack-btn-clear" id="btn-clear" title="Limpar incidentes e buffer local">
                   Limpar
@@ -348,11 +427,17 @@ export class BacktrackWidget {
                               <span>${dateStr}</span>
                               <span class="backtrack-duration-pill">${durationSec}s</span>
                             </div>
-                            <div class="backtrack-incident-sub-id">${inc.id.substring(0, 18)}...</div>
+                            <div class="backtrack-incident-sub-id">${inc.id.substring(0, 16)}...</div>
                           </div>
                           <div class="backtrack-incident-actions">
-                            <button type="button" class="backtrack-action-btn backtrack-btn-view" data-view-id="${inc.id}">
+                            <button type="button" class="backtrack-action-btn backtrack-btn-view" data-view-id="${inc.id}" title="Abrir no visualizador offline">
                               Ver
+                            </button>
+                            <button type="button" class="backtrack-action-btn backtrack-btn-download" data-download-id="${inc.id}" title="Baixar arquivo .ffr.json para anexar no Jira/Slack">
+                              ⬇
+                            </button>
+                            <button type="button" class="backtrack-action-btn backtrack-btn-copy" data-copy-id="${inc.id}" title="Copiar resumo Markdown para Jira/GitHub">
+                              📋
                             </button>
                             <button type="button" class="backtrack-action-btn backtrack-btn-delete" data-delete-id="${inc.id}" title="Excluir gravação">
                               ✕
@@ -400,6 +485,10 @@ export class BacktrackWidget {
         this.handleCapture();
       });
 
+      this.shadow.getElementById('btn-annotate')?.addEventListener('click', () => {
+        this.handleAnnotate();
+      });
+
       this.shadow.getElementById('btn-clear')?.addEventListener('click', () => {
         this.handleClear();
       });
@@ -409,6 +498,20 @@ export class BacktrackWidget {
         btn.addEventListener('click', (e) => {
           const id = (e.currentTarget as HTMLElement).getAttribute('data-view-id');
           if (id) this.handleViewIncident(id);
+        });
+      });
+
+      this.shadow.querySelectorAll('[data-download-id]').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          const id = (e.currentTarget as HTMLElement).getAttribute('data-download-id');
+          if (id) this.handleDownloadIncident(id);
+        });
+      });
+
+      this.shadow.querySelectorAll('[data-copy-id]').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          const id = (e.currentTarget as HTMLElement).getAttribute('data-copy-id');
+          if (id) this.handleCopyMarkdown(id);
         });
       });
 

@@ -9,6 +9,8 @@ export interface IncidentMetadata {
   startedAt: number;
   triggeredAt: number;
   finalizedAt: number;
+  annotationImage?: string;
+  annotations?: Record<string, unknown>;
 }
 
 export interface EnvironmentMetadata {

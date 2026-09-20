@@ -30,7 +30,8 @@ const VALID_TIMELINE_TYPES: ReadonlySet<TimelineEventType> = new Set([
   'error',
   'network',
   'navigation',
-  'marker'
+  'marker',
+  'performance'
 ]);
 
 /**

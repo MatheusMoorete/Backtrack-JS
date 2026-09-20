@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import type { FlightRecorderArtifactV1 } from '../../src/types/artifact';
+import { formatIncidentMarkdown } from '../../src/utils/markdown';
 
 interface IncidentHeaderProps {
   artifact: FlightRecorderArtifactV1;
@@ -9,6 +10,8 @@ interface IncidentHeaderProps {
 export const IncidentHeader: React.FC<IncidentHeaderProps> = ({ artifact, onReset }) => {
   const { incident, environment, diagnostics, recorderVersion } = artifact;
   const [copied, setCopied] = useState(false);
+  const [mdCopied, setMdCopied] = useState(false);
+  const [showAnnotation, setShowAnnotation] = useState(false);
 
   const formatDate = (epoch: number) => {
     return new Date(epoch).toLocaleTimeString();
@@ -40,6 +43,17 @@ export const IncidentHeader: React.FC<IncidentHeaderProps> = ({ artifact, onRese
     }
   };
 
+  const handleCopyMarkdown = () => {
+    try {
+      const md = formatIncidentMarkdown(artifact);
+      navigator.clipboard.writeText(md);
+      setMdCopied(true);
+      setTimeout(() => setMdCopied(false), 2500);
+    } catch {
+      // Fallback
+    }
+  };
+
   const handleExport = () => {
     const blob = new Blob([JSON.stringify(artifact, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -63,13 +77,32 @@ export const IncidentHeader: React.FC<IncidentHeaderProps> = ({ artifact, onRese
             </svg>
           </span>
           <span className="brand-title">Backtrack</span>
-          <span className="brand-version-badge">v{recorderVersion || '0.1.0'}</span>
+          <span className="brand-version-badge">v{recorderVersion || '0.2.0'}</span>
           <span className="incident-status-badge">
             {incident.reason}
           </span>
         </div>
 
         <div className="header-actions">
+          {incident.annotationImage && (
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => setShowAnnotation(true)}
+              style={{ color: '#f59e0b', borderColor: '#f59e0b' }}
+              title="Ver anotação visual do QA na tela"
+            >
+              🎨 Anotação de Tela
+            </button>
+          )}
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={handleCopyMarkdown}
+            title="Copiar relatório formatado para Jira/GitHub"
+          >
+            {mdCopied ? '✓ Copiado p/ Jira' : '📋 Jira / GitHub'}
+          </button>
           <button
             type="button"
             className="btn-secondary"
@@ -88,6 +121,58 @@ export const IncidentHeader: React.FC<IncidentHeaderProps> = ({ artifact, onRese
           </button>
         </div>
       </div>
+
+      {/* Modal de Anotação de Tela */}
+      {showAnnotation && incident.annotationImage && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            width: '100vw',
+            height: '100vh',
+            background: 'rgba(0, 0, 0, 0.85)',
+            zIndex: 999999,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '24px'
+          }}
+          onClick={() => setShowAnnotation(false)}
+        >
+          <div
+            style={{
+              position: 'relative',
+              maxWidth: '90vw',
+              maxHeight: '85vh',
+              background: '#0f172a',
+              borderRadius: '8px',
+              border: '1px solid #334155',
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ padding: '10px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #1e293b' }}>
+              <strong style={{ color: '#f8fafc', fontSize: '13px' }}>🎨 Anotação Visual Registrada no Incidente</strong>
+              <button
+                type="button"
+                style={{ background: 'transparent', border: 'none', color: '#94a3b8', fontSize: '16px', cursor: 'pointer' }}
+                onClick={() => setShowAnnotation(false)}
+              >
+                ✕
+              </button>
+            </div>
+            <img
+              src={incident.annotationImage}
+              alt="Anotação de tela"
+              style={{ maxWidth: '100%', maxHeight: 'calc(85vh - 50px)', objectFit: 'contain' }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Faixa Secundária: Metadados Técnicos em layout plano */}
       <div className="header-secondary-band">

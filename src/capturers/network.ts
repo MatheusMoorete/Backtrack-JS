@@ -1,4 +1,4 @@
-import { sanitizeUrl } from './sanitizer';
+import { sanitizeUrl, sanitizePayloadString, sanitizeHeaders } from './sanitizer';
 import type { BatchWriter } from '../storage/batch-writer';
 import type { IncidentManager } from '../storage/incident-manager';
 import type { NetworkTimelineEvent, NetworkResult } from '../types/timeline';
@@ -7,12 +7,16 @@ export interface NetworkCapturerConfig {
   captureHttpStatus: number[]; // default [500, 502, 503, 504]
   ignoredUrls?: (string | RegExp)[];
   sanitizeUrlCallback?: (url: URL) => string;
+  capturePayloads?: boolean; // default true
+  maxPayloadSize?: number; // default 64KB
 }
 
 interface XHRMetadata {
   method: string;
   url: string;
   startTime: number;
+  requestHeaders?: Record<string, string>;
+  requestBody?: string;
 }
 
 export class NetworkCapturer {
@@ -27,6 +31,7 @@ export class NetworkCapturer {
 
   private originalXHROpen: typeof XMLHttpRequest.prototype.open | null = null;
   private originalXHRSend: typeof XMLHttpRequest.prototype.send | null = null;
+  private originalXHRSetHeader: typeof XMLHttpRequest.prototype.setRequestHeader | null = null;
   private xhrMetadata = new WeakMap<XMLHttpRequest, XHRMetadata>();
 
   constructor(
@@ -40,8 +45,10 @@ export class NetworkCapturer {
     this.sequenceProvider = sequenceProvider;
     this.config = {
       captureHttpStatus: config?.captureHttpStatus ?? [500, 502, 503, 504],
-      ignoredUrls: config?.ignoredUrls,
-      sanitizeUrlCallback: config?.sanitizeUrlCallback
+      ignoredUrls: config?.ignoredUrls ?? [],
+      sanitizeUrlCallback: config?.sanitizeUrlCallback,
+      capturePayloads: config?.capturePayloads ?? true,
+      maxPayloadSize: config?.maxPayloadSize ?? 64 * 1024
     };
   }
 
@@ -99,14 +106,30 @@ export class NetworkCapturer {
     ): Promise<Response> {
       let rawUrl = '';
       let method = init?.method || 'GET';
+      let rawReqHeaders = init?.headers;
+      let rawReqBody: string | undefined = undefined;
 
       if (typeof input === 'string') {
         rawUrl = input;
       } else if (input instanceof URL) {
         rawUrl = input.href;
       } else if (input && typeof (input as Request).url === 'string') {
-        rawUrl = (input as Request).url;
-        method = (input as Request).method || method;
+        const req = input as Request;
+        rawUrl = req.url;
+        method = req.method || method;
+        rawReqHeaders = rawReqHeaders || req.headers;
+      }
+
+      if (self.config.capturePayloads && init?.body) {
+        try {
+          if (typeof init.body === 'string') {
+            rawReqBody = init.body;
+          } else if (typeof URLSearchParams !== 'undefined' && init.body instanceof URLSearchParams) {
+            rawReqBody = init.body.toString();
+          }
+        } catch {
+          // Ignora erro ao extrair body de request
+        }
       }
 
       if (!self.isRecording || self.shouldIgnoreUrl(rawUrl)) {
@@ -115,6 +138,12 @@ export class NetworkCapturer {
 
       const startTime = Date.now();
       const sanitized = sanitizeUrl(rawUrl, self.config.sanitizeUrlCallback);
+      const reqHeaders = self.config.capturePayloads
+        ? sanitizeHeaders(rawReqHeaders as Headers | Record<string, string>)
+        : undefined;
+      const reqBody = self.config.capturePayloads && rawReqBody
+        ? sanitizePayloadString(rawReqBody, self.config.maxPayloadSize)
+        : undefined;
 
       try {
         const response = await self.originalFetch!.call(this, input, init);
@@ -122,12 +151,39 @@ export class NetworkCapturer {
         const status = response.status;
         const result: NetworkResult = status >= 400 ? 'error' : 'success';
 
+        let resHeaders: Record<string, string> | undefined = undefined;
+        let resBody: string | undefined = undefined;
+
+        if (self.config.capturePayloads) {
+          try {
+            resHeaders = sanitizeHeaders(response.headers);
+            const ctype = response.headers?.get('content-type') || '';
+            if (
+              ctype.includes('json') ||
+              ctype.includes('text') ||
+              ctype.includes('xml') ||
+              ctype.includes('javascript') ||
+              ctype.includes('form')
+            ) {
+              const clone = response.clone();
+              const text = await clone.text();
+              resBody = sanitizePayloadString(text, self.config.maxPayloadSize);
+            }
+          } catch {
+            // Ignora falhas de clonagem ou leitura assíncrona
+          }
+        }
+
         self.recordNetworkEvent({
           method: method.toUpperCase(),
           url: sanitized,
           status,
           durationMs,
-          result
+          result,
+          requestHeaders: reqHeaders,
+          requestBody: reqBody,
+          responseHeaders: resHeaders,
+          responseBody: resBody
         });
 
         return response;
@@ -141,7 +197,9 @@ export class NetworkCapturer {
           url: sanitized,
           status: 0,
           durationMs,
-          result
+          result,
+          requestHeaders: reqHeaders,
+          requestBody: reqBody
         });
 
         throw err;
@@ -159,6 +217,7 @@ export class NetworkCapturer {
 
     this.originalXHROpen = proto.open;
     this.originalXHRSend = proto.send;
+    this.originalXHRSetHeader = proto.setRequestHeader;
 
     proto.open = function (
       method: string,
@@ -172,10 +231,19 @@ export class NetworkCapturer {
         self.xhrMetadata.set(this, {
           method: (method || 'GET').toUpperCase(),
           url: rawUrl,
-          startTime: 0
+          startTime: 0,
+          requestHeaders: {}
         });
       }
       return self.originalXHROpen!.call(this, method, url, async, username, password);
+    };
+
+    proto.setRequestHeader = function (header: string, value: string) {
+      const meta = self.xhrMetadata.get(this);
+      if (meta && meta.requestHeaders) {
+        meta.requestHeaders[header] = value;
+      }
+      return self.originalXHRSetHeader!.call(this, header, value);
     };
 
     proto.send = function (body?: Document | XMLHttpRequestBodyInit | null) {
@@ -184,17 +252,55 @@ export class NetworkCapturer {
         meta.startTime = Date.now();
         const sanitized = sanitizeUrl(meta.url, self.config.sanitizeUrlCallback);
 
+        if (self.config.capturePayloads && typeof body === 'string') {
+          meta.requestBody = body;
+        }
+
         let hasFinished = false;
         const onFinish = (result: NetworkResult, status: number) => {
           if (hasFinished) return;
           hasFinished = true;
           const durationMs = meta.startTime ? Date.now() - meta.startTime : 0;
+
+          let resHeaders: Record<string, string> | undefined = undefined;
+          let resBody: string | undefined = undefined;
+
+          if (self.config.capturePayloads) {
+            try {
+              const rawRespHeaders = this.getAllResponseHeaders();
+              if (rawRespHeaders) {
+                const headerMap: Record<string, string> = {};
+                for (const line of rawRespHeaders.trim().split(/[\r\n]+/)) {
+                  const parts = line.split(': ');
+                  const header = parts.shift();
+                  const value = parts.join(': ');
+                  if (header) headerMap[header] = value;
+                }
+                resHeaders = sanitizeHeaders(headerMap);
+              }
+
+              if (this.responseType === '' || this.responseType === 'text') {
+                if (typeof this.responseText === 'string') {
+                  resBody = sanitizePayloadString(this.responseText, self.config.maxPayloadSize);
+                }
+              }
+            } catch {
+              // Ignora
+            }
+          }
+
           self.recordNetworkEvent({
             method: meta.method,
             url: sanitized,
             status,
             durationMs,
-            result
+            result,
+            requestHeaders: sanitizeHeaders(meta.requestHeaders),
+            requestBody: meta.requestBody
+              ? sanitizePayloadString(meta.requestBody, self.config.maxPayloadSize)
+              : undefined,
+            responseHeaders: resHeaders,
+            responseBody: resBody
           });
         };
 
@@ -230,6 +336,10 @@ export class NetworkCapturer {
     status: number;
     durationMs: number;
     result: NetworkResult;
+    requestHeaders?: Record<string, string>;
+    requestBody?: string;
+    responseHeaders?: Record<string, string>;
+    responseBody?: string;
   }): void {
     const now = Date.now();
     const event: NetworkTimelineEvent = {
@@ -241,7 +351,11 @@ export class NetworkCapturer {
       url: params.url,
       status: params.status,
       durationMs: params.durationMs,
-      result: params.result
+      result: params.result,
+      requestHeaders: params.requestHeaders,
+      requestBody: params.requestBody,
+      responseHeaders: params.responseHeaders,
+      responseBody: params.responseBody
     };
 
     this.writer.addTimelineEvent(event);

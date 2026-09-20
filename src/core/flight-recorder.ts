@@ -10,6 +10,7 @@ import { ErrorCapturer } from '../capturers/errors';
 import { NetworkCapturer } from '../capturers/network';
 import { NavigationCapturer } from '../capturers/navigation';
 import { RrwebCapturer } from '../capturers/rrweb';
+import { PerformanceCapturer } from '../capturers/performance';
 
 import { BacktrackWidget } from '../widget/widget';
 
@@ -38,6 +39,7 @@ export class FlightRecorderImpl implements FlightRecorder {
   private networkCapturer: NetworkCapturer | null = null;
   private navigationCapturer: NavigationCapturer | null = null;
   private rrwebCapturer: RrwebCapturer | null = null;
+  private performanceCapturer: PerformanceCapturer | null = null;
 
   private sequence = 0;
   private retentionIntervalTimer: ReturnType<typeof setInterval> | null = null;
@@ -212,6 +214,7 @@ export class FlightRecorderImpl implements FlightRecorder {
       this.rrwebCapturer = new RrwebCapturer(this.writer, {
         privacy: this.options.privacy
       });
+      this.performanceCapturer = new PerformanceCapturer(this.writer, this.nextSequence);
 
       // Ativa capturadores
       this.consoleCapturer.start();
@@ -219,6 +222,7 @@ export class FlightRecorderImpl implements FlightRecorder {
       this.networkCapturer.start();
       this.navigationCapturer.start();
       this.rrwebCapturer.start();
+      this.performanceCapturer.start();
 
       this.stateMachine.transition({ type: 'START' });
 
@@ -275,6 +279,7 @@ export class FlightRecorderImpl implements FlightRecorder {
     this.networkCapturer?.stop();
     this.errorCapturer?.stop();
     this.consoleCapturer?.stop();
+    this.performanceCapturer?.stop();
 
     if (this.writer) {
       this.writer.flush();
@@ -288,6 +293,7 @@ export class FlightRecorderImpl implements FlightRecorder {
     this.networkCapturer = null;
     this.errorCapturer = null;
     this.consoleCapturer = null;
+    this.performanceCapturer = null;
     this.writer = null;
     this.incidentManager = null;
 

@@ -254,3 +254,63 @@ export function sanitizeAndSerialize(input: unknown, config?: SanitizerConfig): 
     return '[SERIALIZATION_FAILED]';
   }
 }
+
+/**
+ * Sanitiza strings de request e response body com redação de PII e teto máximo de tamanho.
+ */
+export function sanitizePayloadString(payload: string, maxLength: number = 64 * 1024): string {
+  if (!payload || typeof payload !== 'string') return '';
+  let str = payload;
+  if (str.length > maxLength) {
+    str = `${str.substring(0, maxLength)}... [TRUNCATED ${payload.length - maxLength} BYTES]`;
+  }
+
+  // Se for JSON, faz parse e sanitiza campos sensíveis mantendo a estrutura
+  try {
+    const parsed = JSON.parse(str);
+    const sanitizedObj = sanitizeAndSerialize(parsed, { maxStringLength: 2000 });
+    return JSON.stringify(sanitizedObj, null, 2);
+  } catch {
+    // Texto simples ou urlencoded
+    return redactSensitiveString(str);
+  }
+}
+
+/**
+ * Sanitiza headers HTTP redigindo Authorization, Cookies, Tokens e Chaves.
+ */
+export function sanitizeHeaders(
+  headers: Record<string, string> | Headers | [string, string][] | undefined | null
+): Record<string, string> | undefined {
+  if (!headers) return undefined;
+
+  const result: Record<string, string> = {};
+  let entries: [string, string][] = [];
+
+  if (typeof Headers !== 'undefined' && headers instanceof Headers) {
+    entries = Array.from(headers.entries());
+  } else if (Array.isArray(headers)) {
+    entries = headers;
+  } else if (typeof headers === 'object') {
+    entries = Object.entries(headers);
+  }
+
+  for (const [rawKey, rawVal] of entries) {
+    const key = String(rawKey);
+    const val = String(rawVal);
+    const lower = key.toLowerCase();
+    if (
+      lower.includes('auth') ||
+      lower.includes('cookie') ||
+      lower.includes('token') ||
+      lower.includes('secret') ||
+      lower.includes('key')
+    ) {
+      result[key] = '[REDACTED]';
+    } else {
+      result[key] = redactSensitiveString(val);
+    }
+  }
+
+  return Object.keys(result).length > 0 ? result : undefined;
+}

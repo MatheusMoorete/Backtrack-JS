@@ -3,7 +3,8 @@ export type TimelineEventType =
   | 'error'
   | 'network'
   | 'navigation'
-  | 'marker';
+  | 'marker'
+  | 'performance';
 
 export interface TimelineEventBase {
   id: string;
@@ -43,6 +44,10 @@ export interface NetworkTimelineEvent extends TimelineEventBase {
   status: number;
   durationMs: number;
   result: NetworkResult;
+  requestHeaders?: Record<string, string>;
+  requestBody?: string;
+  responseHeaders?: Record<string, string>;
+  responseBody?: string;
 }
 
 export type NavigationKind =
@@ -65,9 +70,17 @@ export interface MarkerTimelineEvent extends TimelineEventBase {
   data?: Record<string, unknown>;
 }
 
+export interface PerformanceTimelineEvent extends TimelineEventBase {
+  type: 'performance';
+  metric: 'longtask' | 'fps_drop';
+  durationMs: number;
+  details?: string;
+}
+
 export type TimelineEvent =
   | ConsoleTimelineEvent
   | ErrorTimelineEvent
   | NetworkTimelineEvent
   | NavigationTimelineEvent
-  | MarkerTimelineEvent;
+  | MarkerTimelineEvent
+  | PerformanceTimelineEvent;

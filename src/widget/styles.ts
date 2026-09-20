@@ -390,8 +390,45 @@ export const WIDGET_CSS = `
 }
 
 .backtrack-btn-delete:hover {
-  background-color: rgba(239, 68, 68, 0.2);
-  color: #f87171;
+  background-color: rgba(239, 68, 68, 0.15);
+  border-color: #ef4444;
+}
+
+.backtrack-btn-download,
+.backtrack-btn-copy {
+  background-color: #1e293b;
+  color: #94a3b8;
+  border: 1px solid #334155;
+  padding: 3px 6px;
+}
+
+.backtrack-btn-download:hover,
+.backtrack-btn-copy:hover {
+  background-color: #27354f;
+  color: #f8fafc;
+  border-color: #64748b;
+}
+
+.backtrack-btn-annotate {
+  background-color: #1e293b;
+  border: 1px solid #334155;
+  color: #f59e0b;
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: background-color 0.1s ease, border-color 0.1s ease;
+}
+
+.backtrack-btn-annotate:hover {
+  background-color: #27354f;
+  border-color: #f59e0b;
+  color: #fbbf24;
 }
 
 .backtrack-empty-state {
