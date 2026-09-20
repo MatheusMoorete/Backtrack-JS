@@ -135,6 +135,72 @@ describe('Backtrack v0.1.2 — Widget Nativo e Privacidade por Rota', () => {
       widget.unmount();
       recorder.stop();
     });
+
+    it('exibe tooltip de explicação e permite duração personalizada (Custom) entre 5s e 900s', () => {
+      const recorder = new FlightRecorderImpl({}, db);
+      const widget = new BacktrackWidget(recorder);
+      widget.mount();
+
+      const host = document.getElementById('__backtrack_widget_host__');
+      const launcher = host?.shadowRoot?.getElementById('btn-launcher');
+      launcher?.click();
+
+      // Tooltip explicativo
+      const helpTrigger = host?.shadowRoot?.querySelector('.backtrack-help-tooltip-trigger');
+      expect(helpTrigger).not.toBeNull();
+      expect(helpTrigger?.textContent).toContain('O que é?');
+      expect(helpTrigger?.getAttribute('title')).toContain('5 segundos até 15 minutos');
+
+      // Botões de duração
+      const btn60 = host?.shadowRoot?.getElementById('btn-duration-60');
+      const btn300 = host?.shadowRoot?.getElementById('btn-duration-300');
+      const btnCustom = host?.shadowRoot?.getElementById('btn-duration-custom');
+
+      expect(btn60).not.toBeNull();
+      expect(btn300).not.toBeNull();
+      expect(btnCustom).not.toBeNull();
+
+      // Inicialmente 1 min está selecionado
+      expect(btn60?.classList.contains('is-selected')).toBe(true);
+      expect(host?.shadowRoot?.getElementById('input-custom-duration')).toBeNull();
+
+      // Clica em Custom
+      btnCustom?.click();
+      const updatedBtnCustom = host?.shadowRoot?.getElementById('btn-duration-custom');
+      expect(updatedBtnCustom?.classList.contains('is-selected')).toBe(true);
+
+      const customInput = host?.shadowRoot?.getElementById('input-custom-duration') as HTMLInputElement;
+      expect(customInput).not.toBeNull();
+      expect(customInput.getAttribute('min')).toBe('5');
+      expect(customInput.getAttribute('max')).toBe('900');
+
+      // Altera para 45 segundos
+      customInput.value = '45';
+      customInput.dispatchEvent(new Event('input'));
+      expect((widget as unknown as { selectedDurationSeconds: number }).selectedDurationSeconds).toBe(45);
+
+      // Testa clamp mínimo (menos de 5s vai para 5s)
+      customInput.value = '2';
+      customInput.dispatchEvent(new Event('change'));
+      expect(customInput.value).toBe('5');
+      expect((widget as unknown as { selectedDurationSeconds: number }).selectedDurationSeconds).toBe(5);
+
+      // Testa clamp máximo (mais de 900s / 15 min vai para 900s)
+      customInput.value = '1200';
+      customInput.dispatchEvent(new Event('change'));
+      expect(customInput.value).toBe('900');
+      expect((widget as unknown as { selectedDurationSeconds: number }).selectedDurationSeconds).toBe(900);
+
+      // Alterna de volta para 5 min
+      const updatedBtn300 = host?.shadowRoot?.getElementById('btn-duration-300');
+      updatedBtn300?.click();
+      const finalBtn300 = host?.shadowRoot?.getElementById('btn-duration-300');
+      expect(finalBtn300?.classList.contains('is-selected')).toBe(true);
+      expect((widget as unknown as { selectedDurationSeconds: number }).selectedDurationSeconds).toBe(300);
+      expect(host?.shadowRoot?.getElementById('input-custom-duration')).toBeNull();
+
+      widget.unmount();
+    });
   });
 
   describe('Backtrack.init e showWidget', () => {

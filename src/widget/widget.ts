@@ -22,6 +22,7 @@ export class BacktrackWidget {
   private health: RecorderHealth | null = null;
   private alertMessage: string | null = null;
   private openMenuId: string | null = null;
+  private isCustomDuration = false;
 
   private pollTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -386,23 +387,64 @@ export class BacktrackWidget {
 
               <!-- Duração -->
               <div class="backtrack-duration-section">
-                <div class="backtrack-section-title">Janela de Gravação</div>
+                <div class="backtrack-section-title-row">
+                  <div class="backtrack-section-title">Janela de Gravação</div>
+                  <span
+                    class="backtrack-help-tooltip-trigger"
+                    title="Quanto tempo de histórico retroativo será gravado antes do clique (de 5 segundos até 15 minutos)."
+                  >
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                      <circle cx="12" cy="12" r="10" />
+                      <line x1="12" y1="16" x2="12" y2="12" />
+                      <line x1="12" y1="8" x2="12.01" y2="8" />
+                    </svg>
+                    <span>O que é?</span>
+                  </span>
+                </div>
                 <div class="backtrack-duration-group">
                   <button
                     type="button"
-                    class="backtrack-duration-btn ${this.selectedDurationSeconds === 60 ? 'is-selected' : ''}"
+                    class="backtrack-duration-btn ${!this.isCustomDuration && this.selectedDurationSeconds === 60 ? 'is-selected' : ''}"
                     id="btn-duration-60"
                   >
                     1 min
                   </button>
                   <button
                     type="button"
-                    class="backtrack-duration-btn ${this.selectedDurationSeconds === 300 ? 'is-selected' : ''}"
+                    class="backtrack-duration-btn ${!this.isCustomDuration && this.selectedDurationSeconds === 300 ? 'is-selected' : ''}"
                     id="btn-duration-300"
                   >
                     5 min
                   </button>
+                  <button
+                    type="button"
+                    class="backtrack-duration-btn ${this.isCustomDuration ? 'is-selected' : ''}"
+                    id="btn-duration-custom"
+                  >
+                    Custom
+                  </button>
                 </div>
+                ${
+                  this.isCustomDuration
+                    ? `
+                  <div class="backtrack-custom-duration-row">
+                    <div class="backtrack-custom-input-wrap">
+                      <input
+                        type="number"
+                        class="backtrack-custom-duration-input"
+                        id="input-custom-duration"
+                        min="5"
+                        max="900"
+                        value="${this.selectedDurationSeconds}"
+                        aria-label="Duração personalizada em segundos"
+                      />
+                      <span class="backtrack-custom-unit">segundos</span>
+                    </div>
+                    <span class="backtrack-custom-hint">5s a 900s (15 min)</span>
+                  </div>
+                `
+                    : ''
+                }
               </div>
 
               <!-- Ações -->
@@ -666,13 +708,36 @@ export class BacktrackWidget {
 
       this.shadow.getElementById('btn-duration-60')?.addEventListener('click', () => {
         this.selectedDurationSeconds = 60;
+        this.isCustomDuration = false;
         this.render();
       });
 
       this.shadow.getElementById('btn-duration-300')?.addEventListener('click', () => {
         this.selectedDurationSeconds = 300;
+        this.isCustomDuration = false;
         this.render();
       });
+
+      this.shadow.getElementById('btn-duration-custom')?.addEventListener('click', () => {
+        this.isCustomDuration = true;
+        this.render();
+      });
+
+      const customInput = this.shadow.getElementById('input-custom-duration') as HTMLInputElement | null;
+      if (customInput) {
+        customInput.addEventListener('input', (e) => {
+          const val = parseInt((e.target as HTMLInputElement).value, 10);
+          if (!isNaN(val)) {
+            this.selectedDurationSeconds = Math.max(5, Math.min(900, val));
+          }
+        });
+        customInput.addEventListener('change', (e) => {
+          const val = parseInt((e.target as HTMLInputElement).value, 10);
+          const clamped = isNaN(val) ? 60 : Math.max(5, Math.min(900, val));
+          this.selectedDurationSeconds = clamped;
+          customInput.value = String(clamped);
+        });
+      }
 
       this.shadow.getElementById('btn-save')?.addEventListener('click', () => {
         this.handleCapture();

@@ -209,6 +209,13 @@ export const WIDGET_CSS = `
   margin-bottom: 12px;
 }
 
+.backtrack-section-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
 .backtrack-section-title {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 10px;
@@ -216,7 +223,29 @@ export const WIDGET_CSS = `
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: #64748b;
-  margin-bottom: 6px;
+  margin-bottom: 0;
+}
+
+.backtrack-help-tooltip-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10px;
+  color: #38bdf8;
+  cursor: help;
+  user-select: none;
+  background-color: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.2);
+  border-radius: 3px;
+  padding: 1px 6px;
+  transition: background-color 0.1s ease, color 0.1s ease;
+}
+
+.backtrack-help-tooltip-trigger:hover {
+  background-color: rgba(56, 189, 248, 0.18);
+  color: #7dd3fc;
+  border-color: #38bdf8;
 }
 
 .backtrack-duration-group {
@@ -251,6 +280,56 @@ export const WIDGET_CSS = `
   color: #f8fafc;
   border-color: #3b82f6;
   font-weight: 600;
+}
+
+.backtrack-custom-duration-row {
+  background-color: #0b0f17;
+  border: 1px solid #334155;
+  border-radius: 4px;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.backtrack-custom-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.backtrack-custom-duration-input {
+  background-color: #162032;
+  border: 1px solid #3b82f6;
+  border-radius: 4px;
+  color: #f8fafc;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11.5px;
+  font-weight: 600;
+  width: 65px;
+  padding: 3px 6px;
+  outline: none;
+  text-align: right;
+}
+
+.backtrack-custom-duration-input:focus {
+  border-color: #60a5fa;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
+}
+
+.backtrack-custom-unit {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10.5px;
+  color: #94a3b8;
+}
+
+.backtrack-custom-hint {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10px;
+  color: #64748b;
+  white-space: nowrap;
 }
 
 /* Ações Principais */
