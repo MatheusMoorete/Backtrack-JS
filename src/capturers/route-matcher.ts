@@ -8,16 +8,16 @@ export function globToRegex(pattern: string): RegExp {
     return /^.*$/;
   }
 
-  // Normaliza barras
-  const clean = pattern.startsWith('/') ? pattern : `/${pattern}`;
+  // Normaliza início se não começar com barra ou wildcard
+  const clean = pattern.startsWith('/') || pattern.startsWith('*') ? pattern : `/${pattern}`;
 
   // Escapa caracteres especiais de regex (exceto asteriscos)
   const escaped = clean.replace(/[.+^${}()|[\]\\]/g, '\\$&');
 
-  // Substitui ** por marcador temporário, * por [^/]+, e o marcador por .*
+  // Substitui ** por marcador temporário, * por [^/]*, e o marcador por .*
   const regexStr = escaped
     .replace(/\*\*/g, '§DOUBLE_STAR§')
-    .replace(/\*/g, '[^/]+')
+    .replace(/\*/g, '[^/]*')
     .replace(/§DOUBLE_STAR§/g, '.*');
 
   return new RegExp(`^${regexStr}/?(?:\\?|#|$)`, 'i');
