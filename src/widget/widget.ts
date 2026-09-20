@@ -21,6 +21,7 @@ export class BacktrackWidget {
   private incidents: IncidentSummary[] = [];
   private health: RecorderHealth | null = null;
   private alertMessage: string | null = null;
+  private openMenuId: string | null = null;
 
   private pollTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -277,6 +278,7 @@ export class BacktrackWidget {
 
   private toggleOpen(): void {
     this.isOpen = !this.isOpen;
+    this.openMenuId = null;
     if (this.isOpen) {
       this.updateData();
       if (!this.pollTimer) {
@@ -387,12 +389,7 @@ export class BacktrackWidget {
                   id="btn-save"
                   ${this.isCapturing ? 'disabled' : ''}
                 >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
-                    <polyline points="17 21 17 13 7 13 7 21" />
-                    <polyline points="7 3 7 8 15 8" />
-                  </svg>
-                  ${this.isCapturing ? 'Gravando...' : 'Gravar'}
+                  ${this.isCapturing ? 'Salvando...' : 'Salvar'}
                 </button>
                 <button
                   type="button"
@@ -401,7 +398,7 @@ export class BacktrackWidget {
                   title="Congelar e desenhar na tela antes de gravar"
                   ${this.isCapturing ? 'disabled' : ''}
                 >
-                  ✏️ Anotar
+                  Anotar
                 </button>
                 <button type="button" class="backtrack-btn-clear" id="btn-clear" title="Limpar incidentes e buffer local">
                   Limpar
@@ -431,17 +428,35 @@ export class BacktrackWidget {
                           </div>
                           <div class="backtrack-incident-actions">
                             <button type="button" class="backtrack-action-btn backtrack-btn-view" data-view-id="${inc.id}" title="Abrir no visualizador offline">
-                              Ver
+                              Visualizar
                             </button>
-                            <button type="button" class="backtrack-action-btn backtrack-btn-download" data-download-id="${inc.id}" title="Baixar arquivo .ffr.json para anexar no Jira/Slack">
-                              ⬇
-                            </button>
-                            <button type="button" class="backtrack-action-btn backtrack-btn-copy" data-copy-id="${inc.id}" title="Copiar resumo Markdown para Jira/GitHub">
-                              📋
-                            </button>
-                            <button type="button" class="backtrack-action-btn backtrack-btn-delete" data-delete-id="${inc.id}" title="Excluir gravação">
-                              ✕
-                            </button>
+                            <div class="backtrack-menu-wrapper">
+                              <button
+                                type="button"
+                                class="backtrack-menu-trigger ${this.openMenuId === inc.id ? 'is-active' : ''}"
+                                data-menu-toggle-id="${inc.id}"
+                                title="Mais opções"
+                                aria-label="Mais opções"
+                              >
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                                  <circle cx="12" cy="5" r="2.2" />
+                                  <circle cx="12" cy="12" r="2.2" />
+                                  <circle cx="12" cy="19" r="2.2" />
+                                </svg>
+                              </button>
+                              <div class="backtrack-dropdown-menu ${this.openMenuId === inc.id ? 'is-open' : ''}" id="menu-${inc.id}">
+                                <button type="button" class="backtrack-dropdown-item" data-download-id="${inc.id}">
+                                  <span>⬇ Baixar (.ffr.json)</span>
+                                </button>
+                                <button type="button" class="backtrack-dropdown-item" data-copy-id="${inc.id}">
+                                  <span>📋 Copiar Markdown</span>
+                                </button>
+                                <div class="backtrack-dropdown-divider"></div>
+                                <button type="button" class="backtrack-dropdown-item is-danger" data-delete-id="${inc.id}">
+                                  <span>✕ Excluir</span>
+                                </button>
+                              </div>
+                            </div>
                           </div>
                         </div>
                       `;
@@ -501,25 +516,50 @@ export class BacktrackWidget {
         });
       });
 
+      this.shadow.querySelectorAll('[data-menu-toggle-id]').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const id = (e.currentTarget as HTMLElement).getAttribute('data-menu-toggle-id');
+          this.openMenuId = this.openMenuId === id ? null : id;
+          this.render();
+        });
+      });
+
       this.shadow.querySelectorAll('[data-download-id]').forEach((btn) => {
         btn.addEventListener('click', (e) => {
+          e.stopPropagation();
           const id = (e.currentTarget as HTMLElement).getAttribute('data-download-id');
+          this.openMenuId = null;
           if (id) this.handleDownloadIncident(id);
         });
       });
 
       this.shadow.querySelectorAll('[data-copy-id]').forEach((btn) => {
         btn.addEventListener('click', (e) => {
+          e.stopPropagation();
           const id = (e.currentTarget as HTMLElement).getAttribute('data-copy-id');
+          this.openMenuId = null;
           if (id) this.handleCopyMarkdown(id);
         });
       });
 
       this.shadow.querySelectorAll('[data-delete-id]').forEach((btn) => {
         btn.addEventListener('click', (e) => {
+          e.stopPropagation();
           const id = (e.currentTarget as HTMLElement).getAttribute('data-delete-id');
+          this.openMenuId = null;
           if (id) this.handleDeleteIncident(id);
         });
+      });
+
+      this.shadow.querySelector('.backtrack-panel')?.addEventListener('click', (e) => {
+        if (this.openMenuId) {
+          const target = e.target as HTMLElement | null;
+          if (!target?.closest('.backtrack-menu-wrapper')) {
+            this.openMenuId = null;
+            this.render();
+          }
+        }
       });
     }
   }

@@ -375,6 +375,7 @@ export const WIDGET_CSS = `
   background-color: #1e293b;
   color: #38bdf8;
   border: 1px solid #334155;
+  padding: 4px 9px;
 }
 
 .backtrack-btn-view:hover {
@@ -383,30 +384,91 @@ export const WIDGET_CSS = `
   border-color: #38bdf8;
 }
 
-.backtrack-btn-delete {
+/* Menu de 3 Pontos e Dropdown */
+.backtrack-menu-wrapper {
+  position: relative;
+  display: inline-block;
+}
+
+.backtrack-menu-trigger {
   background-color: transparent;
-  color: #ef4444;
-  border: 1px solid rgba(239, 68, 68, 0.3);
-}
-
-.backtrack-btn-delete:hover {
-  background-color: rgba(239, 68, 68, 0.15);
-  border-color: #ef4444;
-}
-
-.backtrack-btn-download,
-.backtrack-btn-copy {
-  background-color: #1e293b;
+  border: 1px solid transparent;
   color: #94a3b8;
-  border: 1px solid #334155;
-  padding: 3px 6px;
+  border-radius: 4px;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.1s ease, color 0.1s ease, border-color 0.1s ease;
+  outline: none;
+  padding: 0;
 }
 
-.backtrack-btn-download:hover,
-.backtrack-btn-copy:hover {
-  background-color: #27354f;
+.backtrack-menu-trigger:hover,
+.backtrack-menu-trigger.is-active {
+  background-color: #1e293b;
   color: #f8fafc;
-  border-color: #64748b;
+  border-color: #334155;
+}
+
+.backtrack-dropdown-menu {
+  display: none;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  background-color: #0b0f17;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.7), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+  min-width: 165px;
+  z-index: 100;
+  padding: 4px;
+}
+
+.backtrack-dropdown-menu.is-open {
+  display: flex;
+  flex-direction: column;
+}
+
+.backtrack-dropdown-item {
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  padding: 7px 10px;
+  color: #cbd5e1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: background-color 0.1s ease, color 0.1s ease;
+  outline: none;
+  white-space: nowrap;
+  width: 100%;
+}
+
+.backtrack-dropdown-item:hover {
+  background-color: #1e293b;
+  color: #f8fafc;
+}
+
+.backtrack-dropdown-item.is-danger {
+  color: #ef4444;
+}
+
+.backtrack-dropdown-item.is-danger:hover {
+  background-color: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+}
+
+.backtrack-dropdown-divider {
+  height: 1px;
+  background-color: #1e293b;
+  margin: 3px 0;
 }
 
 .backtrack-btn-annotate {
@@ -414,14 +476,14 @@ export const WIDGET_CSS = `
   border: 1px solid #334155;
   color: #f59e0b;
   border-radius: 4px;
-  padding: 6px 10px;
+  padding: 6px 12px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  justify-content: center;
   transition: background-color 0.1s ease, border-color 0.1s ease;
 }
 

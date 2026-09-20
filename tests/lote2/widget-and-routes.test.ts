@@ -73,8 +73,67 @@ describe('Backtrack v0.1.2 — Widget Nativo e Privacidade por Rota', () => {
       const launcher = host?.shadowRoot?.getElementById('btn-launcher');
       expect(launcher).not.toBeNull();
 
+      // Abre o painel
+      launcher?.click();
+
+      // Botão Salvar (sem ícone SVG, texto Salvar)
+      const saveBtn = host?.shadowRoot?.getElementById('btn-save');
+      expect(saveBtn).not.toBeNull();
+      expect(saveBtn?.textContent?.trim()).toBe('Salvar');
+      expect(saveBtn?.querySelector('svg')).toBeNull();
+
+      // Botão Anotar (sem emoji de lápis, texto Anotar)
+      const annotateBtn = host?.shadowRoot?.getElementById('btn-annotate');
+      expect(annotateBtn).not.toBeNull();
+      expect(annotateBtn?.textContent?.trim()).toBe('Anotar');
+
       widget.unmount();
       expect(document.getElementById('__backtrack_widget_host__')).toBeNull();
+    });
+
+    it('renderiza card de incidente com botão Visualizar e menu de 3 pontos para opções secundárias', async () => {
+      const recorder = new FlightRecorderImpl({}, db);
+      await recorder.start();
+      await recorder.capture('Teste incidente');
+
+      const widget = new BacktrackWidget(recorder);
+      widget.mount();
+
+      const host = document.getElementById('__backtrack_widget_host__');
+      const launcher = host?.shadowRoot?.getElementById('btn-launcher');
+      launcher?.click();
+
+      // Aguarda atualização dos incidentes
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const viewBtn = host?.shadowRoot?.querySelector('.backtrack-btn-view');
+      expect(viewBtn).not.toBeNull();
+      expect(viewBtn?.textContent?.trim()).toBe('Visualizar');
+
+      // Menu de 3 pontos
+      const menuTrigger = host?.shadowRoot?.querySelector('.backtrack-menu-trigger') as HTMLButtonElement;
+      expect(menuTrigger).not.toBeNull();
+
+      const dropdown = host?.shadowRoot?.querySelector('.backtrack-dropdown-menu');
+      expect(dropdown).not.toBeNull();
+      expect(dropdown?.classList.contains('is-open')).toBe(false);
+
+      // Clica no menu de 3 pontos para abrir
+      menuTrigger?.click();
+      const openDropdown = host?.shadowRoot?.querySelector('.backtrack-dropdown-menu');
+      expect(openDropdown?.classList.contains('is-open')).toBe(true);
+
+      // Itens do menu
+      const downloadBtn = host?.shadowRoot?.querySelector('[data-download-id]');
+      const copyBtn = host?.shadowRoot?.querySelector('[data-copy-id]');
+      const deleteBtn = host?.shadowRoot?.querySelector('[data-delete-id]');
+
+      expect(downloadBtn?.textContent).toContain('Baixar (.ffr.json)');
+      expect(copyBtn?.textContent).toContain('Copiar Markdown');
+      expect(deleteBtn?.textContent).toContain('Excluir');
+
+      widget.unmount();
+      recorder.stop();
     });
   });
 
