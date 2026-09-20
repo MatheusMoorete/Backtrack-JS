@@ -1,0 +1,267 @@
+{
+  "formatVersion": 1,
+  "recorderVersion": "0.1.0",
+  "incident": {
+    "id": "inc_synth_019482",
+    "reason": "error",
+    "triggers": [
+      {
+        "id": "trig_synth_001",
+        "timestamp": 1710000035000,
+        "type": "error",
+        "signature": "TypeError: Cannot read properties of undefined (reading 'title')",
+        "detail": {
+          "source": "react",
+          "component": "EventDetail"
+        }
+      }
+    ],
+    "startedAt": 1710000000000,
+    "triggeredAt": 1710000035000,
+    "finalizedAt": 1710000050000
+  },
+  "environment": {
+    "url": "http://localhost:3000/demo/event/:id?tab",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "viewport": {
+      "width": 1280,
+      "height": 720
+    },
+    "appVersion": "0.1.0-pilot",
+    "gitBranch": "feature/flight-recorder",
+    "gitCommit": "abc1234"
+  },
+  "timeline": [
+    {
+      "id": "evt_nav_01",
+      "timestamp": 1710000000000,
+      "sequence": 1,
+      "type": "navigation",
+      "kind": "initial",
+      "toUrl": "http://localhost:3000/demo/event/:id?tab"
+    },
+    {
+      "id": "evt_con_01",
+      "timestamp": 1710000005000,
+      "sequence": 2,
+      "type": "console",
+      "level": "log",
+      "args": [
+        "Aplicação sintética inicializada em modo de desenvolvimento",
+        { "sessionId": "sess_synth_9981" }
+      ]
+    },
+    {
+      "id": "evt_net_01",
+      "timestamp": 1710000010000,
+      "sequence": 3,
+      "type": "network",
+      "method": "GET",
+      "url": "http://localhost:3000/api/v1/events/:id",
+      "status": 200,
+      "durationMs": 142,
+      "result": "success"
+    },
+    {
+      "id": "evt_mrk_01",
+      "timestamp": 1710000018000,
+      "sequence": 4,
+      "type": "marker",
+      "label": "Usuário clicou no botão de selecionar ingressos",
+      "data": { "buttonId": "btn-tickets" }
+    },
+    {
+      "id": "evt_con_02",
+      "timestamp": 1710000022000,
+      "sequence": 5,
+      "type": "console",
+      "level": "warn",
+      "args": [
+        "Aviso de depreciação: formato de ingresso legado recebido",
+        { "tiposIngresso": 2 }
+      ]
+    },
+    {
+      "id": "evt_net_02",
+      "timestamp": 1710000028000,
+      "sequence": 6,
+      "type": "network",
+      "method": "POST",
+      "url": "http://localhost:3000/api/v1/checkout/reserve",
+      "status": 500,
+      "durationMs": 310,
+      "result": "error"
+    },
+    {
+      "id": "evt_con_03",
+      "timestamp": 1710000034000,
+      "sequence": 7,
+      "type": "console",
+      "level": "error",
+      "args": [
+        "Falha ao reservar ingresso: resposta 500 do servidor",
+        "Authorization: Bearer [REDACTED_TOKEN]"
+      ]
+    },
+    {
+      "id": "evt_err_01",
+      "timestamp": 1710000035000,
+      "sequence": 8,
+      "type": "error",
+      "name": "TypeError",
+      "message": "Cannot read properties of undefined (reading 'title')",
+      "source": "react",
+      "filename": "http://localhost:3000/src/components/EventDetail.tsx",
+      "lineno": 42,
+      "colno": 15,
+      "stack": "TypeError: Cannot read properties of undefined (reading 'title')\n    at EventDetail (http://localhost:3000/src/components/EventDetail.tsx:42:15)\n    at renderWithHooks (http://localhost:3000/node_modules/react-dom/cjs/react-dom.development.js:16305:18)",
+      "componentStack": "\n    at EventDetail\n    at SentryBoundary\n    at App"
+    },
+    {
+      "id": "evt_mrk_02",
+      "timestamp": 1710000036000,
+      "sequence": 9,
+      "type": "marker",
+      "label": "Captura de incidente disparada automaticamente",
+      "data": { "windowEndsInMs": 14000 }
+    }
+  ],
+  "replay": [
+    {
+      "type": 4,
+      "data": {
+        "href": "http://localhost:3000/demo/event/:id?tab",
+        "width": 1280,
+        "height": 720
+      },
+      "timestamp": 1710000000000
+    },
+    {
+      "type": 2,
+      "data": {
+        "node": {
+          "type": 0,
+          "childNodes": [
+            {
+              "type": 1,
+              "name": "html",
+              "publicId": "",
+              "systemId": "",
+              "id": 1
+            },
+            {
+              "type": 2,
+              "tagName": "html",
+              "attributes": { "lang": "pt-BR" },
+              "childNodes": [
+                {
+                  "type": 2,
+                  "tagName": "head",
+                  "attributes": {},
+                  "childNodes": [
+                    {
+                      "type": 2,
+                      "tagName": "title",
+                      "attributes": {},
+                      "childNodes": [
+                        {
+                          "type": 3,
+                          "textContent": "Evento de Teste Sintético - Flight Recorder",
+                          "id": 5
+                        }
+                      ],
+                      "id": 4
+                    }
+                  ],
+                  "id": 3
+                },
+                {
+                  "type": 2,
+                  "tagName": "body",
+                  "attributes": { "class": "bg-slate-50 font-sans" },
+                  "childNodes": [
+                    {
+                      "type": 2,
+                      "tagName": "div",
+                      "attributes": { "id": "root", "class": "p-8 max-w-4xl mx-auto" },
+                      "childNodes": [
+                        {
+                          "type": 2,
+                          "tagName": "header",
+                          "attributes": { "class": "mb-6 pb-4 border-b border-slate-200" },
+                          "childNodes": [
+                            {
+                              "type": 2,
+                              "tagName": "h1",
+                              "attributes": { "class": "text-2xl font-bold text-slate-900" },
+                              "childNodes": [
+                                {
+                                  "type": 3,
+                                  "textContent": "Festival de Inverno Sintético 2026",
+                                  "id": 9
+                                }
+                              ],
+                              "id": 8
+                            }
+                          ],
+                          "id": 7
+                        },
+                        {
+                          "type": 2,
+                          "tagName": "main",
+                          "attributes": { "class": "space-y-4" },
+                          "childNodes": [
+                            {
+                              "type": 2,
+                              "tagName": "button",
+                              "attributes": {
+                                "id": "btn-tickets",
+                                "class": "px-4 py-2 bg-blue-600 text-white rounded font-medium shadow hover:bg-blue-700"
+                              },
+                              "childNodes": [
+                                {
+                                  "type": 3,
+                                  "textContent": "Selecionar Ingressos",
+                                  "id": 12
+                                }
+                              ],
+                              "id": 11
+                            }
+                          ],
+                          "id": 10
+                        }
+                      ],
+                      "id": 6
+                    }
+                  ],
+                  "id": 2
+                }
+              ],
+              "id": 1
+            }
+          ],
+          "id": 0
+        },
+        "initialOffset": { "left": 0, "top": 0 }
+      },
+      "timestamp": 1710000000100
+    },
+    {
+      "type": 3,
+      "data": {
+        "source": 2,
+        "type": 2,
+        "id": 11,
+        "x": 120,
+        "y": 180
+      },
+      "timestamp": 1710000018000
+    }
+  ],
+  "diagnostics": {
+    "droppedEvents": 0,
+    "storageBytes": 14520,
+    "degraded": false,
+    "degradedReasons": []
+  }
+}

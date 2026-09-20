@@ -1,0 +1,366 @@
+import { FlightRecorderDB } from '../storage/db';
+import { BatchWriter } from '../storage/batch-writer';
+import { RetentionEngine } from '../storage/retention';
+import { IncidentManager } from '../storage/incident-manager';
+import { getOrCreateSessionContext } from '../storage/session';
+import { RecorderStateMachine } from './state-machine';
+
+import { ConsoleCapturer } from '../capturers/console';
+import { ErrorCapturer } from '../capturers/errors';
+import { NetworkCapturer } from '../capturers/network';
+import { NavigationCapturer } from '../capturers/navigation';
+import { RrwebCapturer } from '../capturers/rrweb';
+
+import type {
+  FlightRecorder,
+  FlightRecorderOptions,
+  ErrorContext
+} from '../types/options';
+import type { RecorderHealth } from '../types/health';
+import type { IncidentSummary } from '../types/incident';
+import type { EnvironmentMetadata, FlightRecorderArtifactV1 } from '../types/artifact';
+
+export class FlightRecorderImpl implements FlightRecorder {
+  private options: FlightRecorderOptions;
+  private stateMachine: RecorderStateMachine;
+  private db: FlightRecorderDB;
+  private writer: BatchWriter | null = null;
+  private retention: RetentionEngine;
+  private incidentManager: IncidentManager | null = null;
+
+  private consoleCapturer: ConsoleCapturer | null = null;
+  private errorCapturer: ErrorCapturer | null = null;
+  private networkCapturer: NetworkCapturer | null = null;
+  private navigationCapturer: NavigationCapturer | null = null;
+  private rrwebCapturer: RrwebCapturer | null = null;
+
+  private sequence = 0;
+  private retentionIntervalTimer: ReturnType<typeof setInterval> | null = null;
+  private cachedStorageBytes = 0;
+  private cachedIncidentCount = 0;
+
+  constructor(options?: FlightRecorderOptions, customDb?: FlightRecorderDB) {
+    this.options = {
+      bufferMinutes: options?.bufferMinutes ?? 5,
+      afterErrorSeconds: options?.afterErrorSeconds ?? 15,
+      maxStorageMb: options?.maxStorageMb ?? 50,
+      captureHttpStatus: options?.captureHttpStatus ?? [500, 502, 503, 504],
+      privacy: {
+        maskAllInputs: options?.privacy?.maskAllInputs ?? true,
+        maskAllText: options?.privacy?.maskAllText ?? false,
+        blockMedia: options?.privacy?.blockMedia ?? true,
+        blockSelector: options?.privacy?.blockSelector,
+        maskTextSelector: options?.privacy?.maskTextSelector,
+        sanitizeUrl: options?.privacy?.sanitizeUrl
+      }
+    };
+
+    this.stateMachine = new RecorderStateMachine('stopped');
+    this.db = customDb || new FlightRecorderDB();
+    this.retention = new RetentionEngine(this.db, {
+      bufferMinutes: this.options.bufferMinutes,
+      maxStorageMb: this.options.maxStorageMb
+    });
+  }
+
+  private nextSequence = (): number => {
+    this.sequence++;
+    return this.sequence;
+  };
+
+  private getEnvironmentMetadata(): EnvironmentMetadata {
+    const custom = this.options.metadata;
+    if (typeof window === 'undefined') {
+      return {
+        url: 'http://localhost',
+        userAgent: 'node',
+        viewport: { width: 1280, height: 720 },
+        ...custom
+      };
+    }
+
+    const win = window as unknown as {
+      __APP_VERSION__?: string;
+      __GIT_BRANCH__?: string;
+      __GIT_COMMIT__?: string;
+      __UTICKET_APP_VERSION__?: string;
+      __UTICKET_GIT_BRANCH__?: string;
+      __UTICKET_GIT_COMMIT__?: string;
+    };
+
+    return {
+      url: window.location.href,
+      userAgent: window.navigator.userAgent,
+      viewport: {
+        width: window.innerWidth,
+        height: window.innerHeight
+      },
+      appVersion: custom?.appVersion ?? win.__APP_VERSION__ ?? win.__UTICKET_APP_VERSION__,
+      gitBranch: custom?.gitBranch ?? win.__GIT_BRANCH__ ?? win.__UTICKET_GIT_BRANCH__,
+      gitCommit: custom?.gitCommit ?? win.__GIT_COMMIT__ ?? win.__UTICKET_GIT_COMMIT__,
+      ...custom
+    };
+  }
+
+  public async start(): Promise<void> {
+    // Idempotente: se já estiver gravando, ignora
+    if (this.stateMachine.isRecording()) return;
+
+    try {
+      await this.db.open();
+      const sessionCtx = getOrCreateSessionContext();
+      const environment = this.getEnvironmentMetadata();
+
+      this.writer = new BatchWriter(
+        this.db,
+        sessionCtx.sessionId,
+        sessionCtx.tabId,
+        undefined,
+        (err) => {
+          this.stateMachine.transition({
+            type: 'DEGRADE',
+            reason: err instanceof Error ? err.message : String(err)
+          });
+        }
+      );
+
+      this.incidentManager = new IncidentManager(
+        this.db,
+        sessionCtx.sessionId,
+        sessionCtx.tabId,
+        environment,
+        {
+          afterErrorSeconds: this.options.afterErrorSeconds,
+          recorderVersion: this.options.recorderVersion ?? '0.1.1'
+        }
+      );
+
+      this.incidentManager.setOnIncidentFinalized(() => {
+        this.stateMachine.transition({ type: 'FINALIZE_INCIDENT' });
+        this.updateStatsCache();
+      });
+
+      this.incidentManager.setBeforeFinalize(async () => {
+        if (this.writer) {
+          await this.writer.flush();
+        }
+      });
+
+      // Recupera incidente pendente de reload
+      await this.incidentManager.init();
+
+      // Inicializa os capturadores
+      this.consoleCapturer = new ConsoleCapturer(this.writer, this.nextSequence);
+      this.errorCapturer = new ErrorCapturer(
+        this.writer,
+        this.incidentManager,
+        this.nextSequence
+      );
+      this.networkCapturer = new NetworkCapturer(
+        this.writer,
+        this.incidentManager,
+        this.nextSequence,
+        {
+          captureHttpStatus: this.options.captureHttpStatus,
+          ignoredUrls: this.options.ignoredUrls,
+          sanitizeUrlCallback: this.options.privacy?.sanitizeUrl
+        }
+      );
+      this.navigationCapturer = new NavigationCapturer(
+        this.writer,
+        this.nextSequence,
+        {
+          sanitizeUrlCallback: this.options.privacy?.sanitizeUrl
+        }
+      );
+      this.rrwebCapturer = new RrwebCapturer(this.writer, {
+        privacy: this.options.privacy
+      });
+
+      // Ativa capturadores
+      this.consoleCapturer.start();
+      this.errorCapturer.start();
+      this.networkCapturer.start();
+      this.navigationCapturer.start();
+      this.rrwebCapturer.start();
+
+      this.stateMachine.transition({ type: 'START' });
+
+      // Inicia ciclo de retenção periódico (a cada 30 segundos)
+      this.retentionIntervalTimer = setInterval(() => {
+        this.retention.prune().catch(() => {});
+        this.updateStatsCache();
+      }, 30000);
+
+      this.updateStatsCache();
+    } catch (err) {
+      this.stateMachine.transition({
+        type: 'DEGRADE',
+        reason: `Falha ao iniciar recorder: ${err instanceof Error ? err.message : String(err)}`
+      });
+    }
+  }
+
+  private async updateStatsCache(): Promise<void> {
+    try {
+      this.cachedStorageBytes = await this.db.estimateStorageBytes();
+      const incs = await this.db.listIncidents();
+      this.cachedIncidentCount = incs.length;
+    } catch {
+      // Ignora erro ao atualizar cache de stats
+    }
+  }
+
+  public stop(): void {
+    if (this.stateMachine.getState() === 'stopped') return;
+
+    if (this.retentionIntervalTimer) {
+      clearInterval(this.retentionIntervalTimer);
+      this.retentionIntervalTimer = null;
+    }
+
+    this.rrwebCapturer?.stop();
+    this.navigationCapturer?.stop();
+    this.networkCapturer?.stop();
+    this.errorCapturer?.stop();
+    this.consoleCapturer?.stop();
+
+    if (this.writer) {
+      this.writer.flush();
+      this.writer.destroy();
+    }
+
+    this.incidentManager?.destroy();
+
+    this.rrwebCapturer = null;
+    this.navigationCapturer = null;
+    this.networkCapturer = null;
+    this.errorCapturer = null;
+    this.consoleCapturer = null;
+    this.writer = null;
+    this.incidentManager = null;
+
+    this.stateMachine.transition({ type: 'STOP' });
+  }
+
+  public async capture(reason: string = 'manual', windowSeconds?: number): Promise<string> {
+    if (!this.incidentManager || !this.writer) {
+      throw new Error('FlightRecorder não está em execução.');
+    }
+
+    const now = Date.now();
+
+    // Registra marcador da captura manual na timeline
+    this.writer.addTimelineEvent({
+      id: `marker_manual_${now}`,
+      timestamp: now,
+      sequence: this.nextSequence(),
+      type: 'marker',
+      label: `Captura manual: ${reason}`
+    });
+
+    // Flush antes de capturar para garantir integridade e persistência do chunk ativo
+    await this.writer.flush();
+
+    const incidentId = await this.incidentManager.trigger(
+      'manual',
+      {
+        id: `trig_manual_${now}`,
+        timestamp: now,
+        type: 'manual',
+        signature: `manual_capture_${reason}`,
+        detail: { userReason: reason, windowSeconds }
+      },
+      windowSeconds
+    );
+
+    this.stateMachine.transition({ type: 'TRIGGER_MANUAL' });
+    await this.updateStatsCache();
+    return incidentId;
+  }
+
+  public captureException(error: unknown, context?: ErrorContext): void {
+    if (!this.errorCapturer) return;
+    try {
+      this.errorCapturer.captureException(error, context);
+    } catch {
+      // captureException nunca relança
+    }
+  }
+
+  public async listIncidents(): Promise<IncidentSummary[]> {
+    try {
+      return await this.db.listIncidents();
+    } catch {
+      return [];
+    }
+  }
+
+  public async getArtifact(incidentId: string): Promise<FlightRecorderArtifactV1> {
+    if (!this.incidentManager) {
+      // Instancia manager ad-hoc para exportar mesmo se parado
+      const env = this.getEnvironmentMetadata();
+      const mgr = new IncidentManager(this.db, '', '', env);
+      return mgr.exportArtifact(incidentId);
+    }
+    return this.incidentManager.exportArtifact(incidentId);
+  }
+
+  public async exportIncident(incidentId: string): Promise<FlightRecorderArtifactV1> {
+    const artifact = await this.getArtifact(incidentId);
+    const jsonStr = JSON.stringify(artifact, null, 2);
+
+    const dateStr = new Date(artifact.incident.triggeredAt)
+      .toISOString()
+      .replace(/:/g, '-')
+      .replace(/\..+/, '');
+    const filename = `flight-recorder-${dateStr}-${artifact.incident.reason}-${incidentId}.ffr.json`;
+
+    if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+      const blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    return artifact;
+  }
+
+  public async deleteIncident(incidentId: string): Promise<void> {
+    await this.db.deleteIncident(incidentId);
+    await this.updateStatsCache();
+  }
+
+  public async clear(): Promise<void> {
+    await this.db.clearAll();
+    this.cachedStorageBytes = 0;
+    this.cachedIncidentCount = 0;
+  }
+
+  public getHealth(): RecorderHealth {
+    const droppedEvents =
+      (this.retention.getDroppedEventsTotal()) +
+      (this.rrwebCapturer?.getDroppedEventsCount() ?? 0);
+
+    return {
+      state: this.stateMachine.getState(),
+      droppedEvents,
+      storageBytes: this.cachedStorageBytes,
+      pendingWrites: this.writer?.getPendingWrites() ?? 0,
+      incidentCount: this.cachedIncidentCount,
+      reasons: this.stateMachine.getDegradedReasons()
+    };
+  }
+}
+
+/**
+ * Função factory pública para instanciar o Flight Recorder.
+ */
+export function createFlightRecorder(options?: FlightRecorderOptions): FlightRecorder {
+  return new FlightRecorderImpl(options);
+}

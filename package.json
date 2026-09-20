@@ -1,0 +1,70 @@
+{
+  "name": "@backtrack/browser",
+  "version": "0.1.1",
+  "description": "Backtrack - Privacy-first client-side time travel & bug recording for web apps",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "typings": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "bin": {
+    "backtrack": "./bin/cli.js"
+  },
+  "files": [
+    "dist",
+    "bin",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build:lib": "vite build && tsc -p tsconfig.build.json",
+    "build:viewer": "vite build viewer --outDir ../dist/viewer --emptyOutDir",
+    "build": "npm run build:lib && npm run build:viewer",
+    "test": "vitest run",
+    "gate:0": "tsx scripts/verify-fixture.ts",
+    "gate:1": "tsx scripts/verify-lote1.ts",
+    "gate:2": "tsx scripts/verify-lote2.ts",
+    "gate:3": "tsx scripts/verify-lote3.ts",
+    "viewer": "vite viewer",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "backtrack",
+    "flight-recorder",
+    "rrweb",
+    "blackbox",
+    "debugging",
+    "incident",
+    "error-tracking",
+    "browser",
+    "session-replay"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@rrweb/record": "^2.1.6"
+  },
+  "devDependencies": {
+    "@rrweb/replay": "^2.1.6",
+    "@testing-library/react": "^16.3.3",
+    "@types/node": "^20.11.0",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "@vitejs/plugin-react": "^4.7.0",
+    "fake-indexeddb": "^6.2.5",
+    "happy-dom": "^20.14.5",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "tsx": "^4.7.1",
+    "typescript": "^5.4.0",
+    "vite": "^5.2.0",
+    "vitest": "^1.5.0"
+  }
+}

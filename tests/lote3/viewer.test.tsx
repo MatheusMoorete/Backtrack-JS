@@ -1,0 +1,308 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
+
+import { App } from '../../viewer/App';
+import { FileImporter } from '../../viewer/components/FileImporter';
+import { TimelineView } from '../../viewer/components/TimelineView';
+import type { FlightRecorderArtifactV1 } from '../../src/types/artifact';
+
+describe('Lote 3 — Viewer do Flight Recorder', () => {
+  const fixturePath = resolve(__dirname, '../../fixtures/v1-synthetic-fixture.ffr.json');
+  const rawFixture = readFileSync(fixturePath, 'utf-8');
+  const validArtifact: FlightRecorderArtifactV1 = JSON.parse(rawFixture);
+
+  let fetchSpy: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    sessionStorage.clear();
+    fetchSpy = vi.fn();
+    window.fetch = fetchSpy as unknown as typeof fetch;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('FileImporter rejeita arquivo que excede o limite máximo antes de fazer parse', async () => {
+    const onLoaded = vi.fn();
+    render(<FileImporter onArtifactLoaded={onLoaded} maxSizeBytes={1024} />);
+
+    // Cria arquivo simulado com 2048 bytes (> 1024 bytes)
+    const largeContent = 'a'.repeat(2048);
+    const largeFile = new File([largeContent], 'large-incident.ffr.json', {
+      type: 'application/json'
+    });
+
+    const dropzone = screen.getByRole('button', { name: /área de importação/i });
+
+    fireEvent.drop(dropzone, {
+      dataTransfer: {
+        files: [largeFile]
+      }
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toBeDefined();
+      expect(screen.getByText(/excede o limite máximo permitido/i)).toBeDefined();
+    });
+
+    expect(onLoaded).not.toHaveBeenCalled();
+  });
+
+  it('FileImporter exibe erro controlado quando o JSON é inválido', async () => {
+    const onLoaded = vi.fn();
+    render(<FileImporter onArtifactLoaded={onLoaded} />);
+
+    const corruptedFile = new File(['{ invalid json content !!!'], 'corrupted.ffr.json', {
+      type: 'application/json'
+    });
+
+    const dropzone = screen.getByRole('button', { name: /área de importação/i });
+
+    fireEvent.drop(dropzone, {
+      dataTransfer: {
+        files: [corruptedFile]
+      }
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toBeDefined();
+      expect(screen.getByText(/não é um json válido/i)).toBeDefined();
+    });
+
+    expect(onLoaded).not.toHaveBeenCalled();
+  });
+
+  it('FileImporter exibe erro de versão desconhecida do schema', async () => {
+    const onLoaded = vi.fn();
+    render(<FileImporter onArtifactLoaded={onLoaded} />);
+
+    const wrongVersionFile = new File(
+      [JSON.stringify({ ...validArtifact, formatVersion: 99 })],
+      'v99.ffr.json',
+      { type: 'application/json' }
+    );
+
+    const dropzone = screen.getByRole('button', { name: /área de importação/i });
+
+    fireEvent.drop(dropzone, {
+      dataTransfer: {
+        files: [wrongVersionFile]
+      }
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toBeDefined();
+      expect(screen.getByText(/versão do formato desconhecida/i)).toBeDefined();
+    });
+
+    expect(onLoaded).not.toHaveBeenCalled();
+  });
+
+  it('App renderiza fixture válida com cabeçalho, replay e timeline', async () => {
+    render(<App />);
+
+    // Simula importação da fixture canônica
+    const validFile = new File([rawFixture], 'fixture.ffr.json', {
+      type: 'application/json'
+    });
+
+    const dropzone = screen.getByRole('button', { name: /área de importação/i });
+
+    fireEvent.drop(dropzone, {
+      dataTransfer: {
+        files: [validFile]
+      }
+    });
+
+    await waitFor(() => {
+      // Metadados no cabeçalho
+      expect(screen.getByText(/inc_synth_019482/i)).toBeDefined();
+    });
+
+    // Timeline contém itens
+    expect(screen.getAllByText(/demo\/event\/:id\?tab/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Aplicação sintética inicializada/i)).toBeDefined();
+  });
+
+  it('TimelineView filtra eventos por categoria e busca textual', async () => {
+    const onSelect = vi.fn();
+    render(
+      <TimelineView
+        events={validArtifact.timeline}
+        currentTimeMs={validArtifact.incident.triggeredAt}
+        onSelectEvent={onSelect}
+      />
+    );
+
+    // Inicialmente mostra todos os eventos
+    expect(screen.getByText(/Aplicação sintética inicializada/i)).toBeDefined();
+
+    // Filtra por Erros (Errors)
+    const errorFilterBtn = screen.getByRole('button', { name: 'Errors' });
+    fireEvent.click(errorFilterBtn);
+
+    // Evento de console comum desaparece, erro permanece
+    expect(screen.queryByText(/Aplicação sintética inicializada/i)).toBeNull();
+    expect(screen.getAllByText(/Cannot read properties of undefined/i).length).toBeGreaterThan(0);
+
+    // Volta para Todos (All) e busca por "500"
+    const allFilterBtn = screen.getByRole('button', { name: 'All' });
+    fireEvent.click(allFilterBtn);
+
+    const searchInput = screen.getByRole('searchbox', { name: /buscar na timeline/i });
+    fireEvent.change(searchInput, { target: { value: 'checkout/reserve' } });
+
+    expect(screen.getByText(/checkout\/reserve/i)).toBeDefined();
+    expect(screen.queryByText(/Aplicação sintética inicializada/i)).toBeNull();
+  });
+
+  it('clique em item da timeline invoca onSelectEvent para seek no replay', () => {
+    const onSelect = vi.fn();
+    render(
+      <TimelineView
+        events={validArtifact.timeline}
+        currentTimeMs={0}
+        onSelectEvent={onSelect}
+      />
+    );
+
+    const firstItem = screen.getByText(/demo\/event\/:id\?tab/i);
+    fireEvent.click(firstItem);
+
+    expect(onSelect).toHaveBeenCalledWith(validArtifact.timeline[0].timestamp);
+  });
+
+  it('PROVA DE SEGURANÇA: nenhuma requisição de rede externa é realizada ao abrir e inspecionar a fixture', async () => {
+    render(<App />);
+
+    const validFile = new File([rawFixture], 'fixture.ffr.json', {
+      type: 'application/json'
+    });
+
+    const dropzone = screen.getByRole('button', { name: /área de importação/i });
+
+    fireEvent.drop(dropzone, {
+      dataTransfer: {
+        files: [validFile]
+      }
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(validArtifact.incident.id)).toBeDefined();
+    });
+
+    // Confirma zero chamadas fetch
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('carrega artefato automaticamente ao receber mensagem postMessage LOAD_FFR_ARTIFACT', async () => {
+    render(<App />);
+
+    // Simula evento postMessage vindo de uma janela do uTicket
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: {
+          type: 'LOAD_FFR_ARTIFACT',
+          artifact: validArtifact
+        },
+        origin: 'http://localhost:3000'
+      })
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(validArtifact.incident.id)).toBeDefined();
+    });
+  });
+
+  it('ReplayPlayer exibe botões de salto segundo a segundo e controle de zoom', async () => {
+    render(<App />);
+
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: {
+          type: 'LOAD_FFR_ARTIFACT',
+          artifact: validArtifact
+        },
+        origin: 'http://localhost:3000'
+      })
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(validArtifact.incident.id)).toBeDefined();
+    });
+
+    // Botões de salto de segundo
+    expect(screen.getByRole('button', { name: 'Voltar 1 segundo' })).toBeDefined();
+    expect(screen.getByRole('button', { name: 'Avançar 1 segundo' })).toBeDefined();
+    expect(screen.getByRole('button', { name: 'Voltar 5 segundos' })).toBeDefined();
+    expect(screen.getByRole('button', { name: 'Avançar 5 segundos' })).toBeDefined();
+
+    // Controle de Zoom
+    const zoomSelect = screen.getByRole('combobox', { name: 'Controle de Zoom' });
+    expect(zoomSelect).toBeDefined();
+
+    // Altera o zoom para 50%
+    fireEvent.change(zoomSelect, { target: { value: '0.5' } });
+    expect((zoomSelect as HTMLSelectElement).value).toBe('0.5');
+
+    // Clica em avançar 1 segundo
+    const forward1sBtn = screen.getByRole('button', { name: 'Avançar 1 segundo' });
+    fireEvent.click(forward1sBtn);
+  });
+
+  it('abas responsivas alternam o painel selecionado sem descarregar o incidente nem perder a timeline', async () => {
+    render(<App />);
+
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: {
+          type: 'LOAD_FFR_ARTIFACT',
+          artifact: validArtifact
+        },
+        origin: 'http://localhost:3000'
+      })
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(validArtifact.incident.id)).toBeDefined();
+    });
+
+    const replayTab = screen.getByRole('tab', { name: 'Replay' });
+    const timelineTab = screen.getByRole('tab', { name: 'Eventos' });
+
+    // Inicialmente inicia em Replay
+    expect(replayTab.getAttribute('aria-selected')).toBe('true');
+    expect(timelineTab.getAttribute('aria-selected')).toBe('false');
+
+    const replayPanel = screen.getByRole('tabpanel', { name: 'Replay' });
+    const timelinePanel = screen.getByRole('tabpanel', { name: 'Eventos' });
+
+    expect(replayPanel.classList.contains('mobile-hidden')).toBe(false);
+    expect(timelinePanel.classList.contains('mobile-hidden')).toBe(true);
+
+    // Alterna para aba Eventos
+    fireEvent.click(timelineTab);
+
+    expect(replayTab.getAttribute('aria-selected')).toBe('false');
+    expect(timelineTab.getAttribute('aria-selected')).toBe('true');
+    expect(replayPanel.classList.contains('mobile-hidden')).toBe(true);
+    expect(timelinePanel.classList.contains('mobile-hidden')).toBe(false);
+
+    // O incidente continua perfeitamente carregado
+    expect(screen.getByText(validArtifact.incident.id)).toBeDefined();
+    expect(screen.getByText(/Aplicação sintética inicializada/i)).toBeDefined();
+
+    // Alterna de volta para Replay
+    fireEvent.click(replayTab);
+
+    expect(replayTab.getAttribute('aria-selected')).toBe('true');
+    expect(timelineTab.getAttribute('aria-selected')).toBe('false');
+    expect(replayPanel.classList.contains('mobile-hidden')).toBe(false);
+    expect(timelinePanel.classList.contains('mobile-hidden')).toBe(true);
+    expect(screen.getByText(validArtifact.incident.id)).toBeDefined();
+  });
+});
+
