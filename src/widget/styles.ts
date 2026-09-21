@@ -6,8 +6,8 @@ export const WIDGET_CSS = `
 :host {
   all: initial;
   position: fixed;
-  bottom: 16px;
-  left: 16px;
+  bottom: max(16px, env(safe-area-inset-bottom, 16px));
+  left: max(16px, env(safe-area-inset-left, 16px));
   z-index: 999999;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   color: #cbd5e1;
@@ -240,6 +240,25 @@ export const WIDGET_CSS = `
 
 .backtrack-storage-tooltip-trigger:hover {
   color: #38bdf8;
+}
+
+.backtrack-config-viewer-btn {
+  background: transparent;
+  border: none;
+  color: #64748b;
+  cursor: pointer;
+  padding: 1px 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+  border-radius: 3px;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.backtrack-config-viewer-btn:hover {
+  color: #38bdf8;
+  background-color: rgba(56, 189, 248, 0.12);
 }
 
 /* Alertas de Feedback */
@@ -785,5 +804,44 @@ export const WIDGET_CSS = `
 .backtrack-btn-secondary:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* ==========================================================================
+   Mobile & Responsive Adaptations (<= 480px)
+   ========================================================================== */
+@media (max-width: 480px) {
+  .backtrack-panel {
+    left: 8px !important;
+    right: 8px !important;
+    width: auto !important;
+    max-width: calc(100vw - 16px) !important;
+    bottom: max(56px, calc(env(safe-area-inset-bottom, 0px) + 56px)) !important;
+    max-height: calc(100vh - 76px) !important;
+    border-radius: 8px;
+  }
+
+  .backtrack-modal-card {
+    width: calc(100vw - 20px) !important;
+    max-width: calc(100vw - 20px) !important;
+    margin: 10px !important;
+  }
+
+  .backtrack-modal-body {
+    padding: 12px !important;
+  }
+
+  .backtrack-duration-group {
+    flex-wrap: wrap;
+  }
+
+  .backtrack-actions-row {
+    gap: 6px;
+  }
+
+  .backtrack-btn-save,
+  .backtrack-action-btn,
+  .backtrack-btn-clear {
+    min-height: 36px;
+  }
 }
 `;

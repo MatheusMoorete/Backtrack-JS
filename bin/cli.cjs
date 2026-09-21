@@ -73,10 +73,23 @@ const server = http.createServer((req, res) => {
   });
 });
 
-server.listen(port, () => {
+const os = require('os');
+
+server.listen(port, '0.0.0.0', () => {
   const url = `http://localhost:${port}`;
   console.log('\n\x1b[36m⏪ Backtrack Viewer\x1b[0m');
   console.log(`  > Local:   \x1b[32m${url}\x1b[0m`);
+
+  // Detecta o IP da máquina na rede local Wi-Fi / Ethernet
+  const nets = os.networkInterfaces();
+  for (const name of Object.keys(nets)) {
+    for (const net of nets[name] || []) {
+      if (net.family === 'IPv4' && !net.internal) {
+        console.log(`  > Network: \x1b[32mhttp://${net.address}:${port}\x1b[0m (para abrir no celular)`);
+      }
+    }
+  }
+
   console.log('  > Ready to inspect incidents. Press Ctrl+C to exit.\n');
 
   // Tenta abrir o navegador automaticamente

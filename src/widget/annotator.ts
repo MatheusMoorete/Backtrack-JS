@@ -81,8 +81,61 @@ export class ScreenAnnotator {
       left: 0;
       width: 100%;
       height: 100%;
+      touch-action: none;
     `;
     overlay.appendChild(canvas);
+
+    // Estilos responsivos do annotator para telas móveis
+    const styleEl = document.createElement('style');
+    styleEl.textContent = `
+      .backtrack-annotator-toolbar {
+        position: fixed;
+        top: 18px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        background: #0f172a;
+        padding: 5px 8px;
+        border-radius: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        box-shadow: 0 12px 30px -4px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(0,0,0,0.4);
+        color: #fff;
+        font-size: 13px;
+        z-index: 2147483648;
+        backdrop-filter: blur(12px);
+      }
+      @media (max-width: 600px) {
+        .backtrack-annotator-toolbar {
+          top: max(8px, env(safe-area-inset-top, 8px)) !important;
+          max-width: calc(100vw - 12px) !important;
+          overflow-x: auto !important;
+          padding: 4px 6px !important;
+          gap: 3px !important;
+          border-radius: 8px !important;
+        }
+        .backtrack-shortcut-badge {
+          display: none !important;
+        }
+        .backtrack-tool-btn {
+          width: 31px !important;
+          height: 31px !important;
+          flex-shrink: 0 !important;
+        }
+        .backtrack-color-btn {
+          width: 17px !important;
+          height: 17px !important;
+          flex-shrink: 0 !important;
+        }
+        .backtrack-action-btn {
+          width: 29px !important;
+          height: 29px !important;
+          flex-shrink: 0 !important;
+        }
+      }
+    `;
+    overlay.appendChild(styleEl);
 
     const ctx = canvas.getContext ? canvas.getContext('2d') : null;
     this.ctx = ctx;
@@ -91,27 +144,9 @@ export class ScreenAnnotator {
 
     // Barra de ferramentas flutuante
     const toolbar = document.createElement('div');
-    toolbar.className = 'backtrack-ignore backtrack-block rr-ignore rr-block';
+    toolbar.className = 'backtrack-ignore backtrack-block rr-ignore rr-block backtrack-annotator-toolbar';
     toolbar.setAttribute('data-rr-ignore', 'true');
     toolbar.setAttribute('data-backtrack-ignore', 'true');
-    toolbar.style.cssText = `
-      position: fixed;
-      top: 18px;
-      left: 50%;
-      transform: translateX(-50%);
-      display: flex;
-      align-items: center;
-      gap: 5px;
-      background: #0f172a;
-      padding: 5px 8px;
-      border-radius: 10px;
-      border: 1px solid rgba(255, 255, 255, 0.16);
-      box-shadow: 0 12px 30px -4px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(0,0,0,0.4);
-      color: #fff;
-      font-size: 13px;
-      z-index: 2147483648;
-      backdrop-filter: blur(12px);
-    `;
 
     // Ícones no padrão estrito dos prints do usuário + ferramenta de seleção para arrastar
     toolbar.innerHTML = `
@@ -120,7 +155,7 @@ export class ScreenAnnotator {
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M3 3l7 18 3-7 7-3L3 3z"/>
         </svg>
-        <span style="${this.getShortcutBadgeStyle()}">V</span>
+        <span class="backtrack-shortcut-badge" style="${this.getShortcutBadgeStyle()}">V</span>
       </button>
 
       <!-- Caneta (P) -->
@@ -128,7 +163,7 @@ export class ScreenAnnotator {
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
         </svg>
-        <span style="${this.getShortcutBadgeStyle()}">P</span>
+        <span class="backtrack-shortcut-badge" style="${this.getShortcutBadgeStyle()}">P</span>
       </button>
 
       <!-- Seta (A) -->
@@ -137,7 +172,7 @@ export class ScreenAnnotator {
           <line x1="5" y1="12" x2="19" y2="12"/>
           <polyline points="12 5 19 12 12 19"/>
         </svg>
-        <span style="${this.getShortcutBadgeStyle()}">A</span>
+        <span class="backtrack-shortcut-badge" style="${this.getShortcutBadgeStyle()}">A</span>
       </button>
 
       <!-- Retângulo (R) -->
@@ -145,7 +180,7 @@ export class ScreenAnnotator {
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
           <rect x="3.5" y="3.5" width="17" height="17" rx="3.5" ry="3.5"/>
         </svg>
-        <span style="${this.getShortcutBadgeStyle()}">R</span>
+        <span class="backtrack-shortcut-badge" style="${this.getShortcutBadgeStyle()}">R</span>
       </button>
 
       <!-- Régua de QA (M) -->
@@ -157,7 +192,7 @@ export class ScreenAnnotator {
           <line x1="14.5" y1="7" x2="14.5" y2="11.5" />
           <line x1="18.5" y1="7" x2="18.5" y2="13.5" />
         </svg>
-        <span style="${this.getShortcutBadgeStyle()}">M</span>
+        <span class="backtrack-shortcut-badge" style="${this.getShortcutBadgeStyle()}">M</span>
       </button>
 
       <!-- Texto (T) -->
@@ -167,7 +202,7 @@ export class ScreenAnnotator {
           <line x1="12" y1="4" x2="12" y2="20"/>
           <line x1="8" y1="20" x2="16" y2="20"/>
         </svg>
-        <span style="${this.getShortcutBadgeStyle()}">T</span>
+        <span class="backtrack-shortcut-badge" style="${this.getShortcutBadgeStyle()}">T</span>
       </button>
       
       <div style="width: 1px; height: 20px; background: rgba(255,255,255,0.12); margin: 0 3px;"></div>
@@ -264,216 +299,257 @@ export class ScreenAnnotator {
     };
     window.addEventListener('keydown', keyHandler);
 
-    // Eventos do Mouse no Canvas
+    // Eventos do Mouse e Touch no Canvas
     canvas.addEventListener('mousedown', (e) => {
-      this.closePopover();
-      const x = e.clientX;
-      const y = e.clientY;
-
-      // Verifica se clicou em cima de um elemento existente
-      const hitItem = this.findItemAt(x, y);
-
-      // Se a ferramenta atual é 'select', ou se clicou em um item já desenhado
-      if (this.tool === 'select' || (hitItem && this.tool !== 'pen')) {
-        if (hitItem) {
-          this.selectedItemId = hitItem.id;
-          this.isDraggingItem = true;
-          this.dragStartX = x;
-          this.dragStartY = y;
-          canvas.style.cursor = 'grabbing';
-          this.redraw();
-          return;
-        }
-        this.selectedItemId = null;
-        this.redraw();
-        if (this.tool === 'select') return;
-      }
-
-      if (this.tool === 'text') {
-        this.openTextInput(x, y);
-        return;
-      }
-
-      this.isMouseDown = true;
-      this.activeDrawStart = { x, y };
-      this.dragStartX = x;
-      this.dragStartY = y;
-
-      if (this.tool === 'pen') {
-        this.activePoints = [{ x, y }];
-      }
+      this.handlePointerDown(e.clientX, e.clientY);
     });
 
     canvas.addEventListener('mousemove', (e) => {
-      const x = e.clientX;
-      const y = e.clientY;
-
-      // 1. Se estiver arrastando um elemento existente
-      if (this.isDraggingItem && this.selectedItemId) {
-        const item = this.items.find((it) => it.id === this.selectedItemId);
-        if (item) {
-          const dx = x - this.dragStartX;
-          const dy = y - this.dragStartY;
-          this.dragStartX = x;
-          this.dragStartY = y;
-
-          item.x1 += dx;
-          item.y1 += dy;
-          item.x2 += dx;
-          item.y2 += dy;
-
-          if (item.points) {
-            item.points.forEach((p) => {
-              p.x += dx;
-              p.y += dy;
-            });
-          }
-
-          this.redraw();
-          return;
-        }
-      }
-
-      // 2. Se estiver desenhando um novo elemento
-      if (this.isMouseDown) {
-        if (this.tool === 'pen') {
-          this.activePoints.push({ x, y });
-          this.redraw();
-          // Linha ativa
-          this.drawLivePen(this.activePoints, this.color);
-        } else if (this.tool === 'rect') {
-          this.redraw();
-          this.drawLiveRect(this.activeDrawStart.x, this.activeDrawStart.y, x, y, this.color);
-        } else if (this.tool === 'arrow') {
-          this.redraw();
-          this.drawLiveArrow(this.activeDrawStart.x, this.activeDrawStart.y, x, y, this.color);
-        } else if (this.tool === 'ruler') {
-          this.redraw();
-          this.drawLiveRuler(this.activeDrawStart.x, this.activeDrawStart.y, x, y, this.color);
-        }
-        return;
-      }
-
-      // 3. Hover: atualiza cursor conforme proximidade de itens
-      if (this.tool === 'select') {
-        const hit = this.findItemAt(x, y);
-        canvas.style.cursor = hit ? 'grab' : 'default';
-      } else {
-        const hit = this.findItemAt(x, y);
-        canvas.style.cursor = hit ? 'grab' : 'crosshair';
-      }
+      this.handlePointerMove(e.clientX, e.clientY, true);
     });
 
     canvas.addEventListener('mouseup', (e) => {
-      const x = e.clientX;
-      const y = e.clientY;
+      this.handlePointerUp(e.clientX, e.clientY);
+    });
 
-      if (this.isDraggingItem) {
-        this.isDraggingItem = false;
-        canvas.style.cursor = 'grab';
-        this.recordHistory();
+    // Suporte nativo a toque para telas sensíveis ao toque (Mobile / iPad / Android)
+    canvas.addEventListener(
+      'touchstart',
+      (e) => {
+        if (e.touches.length > 0) {
+          e.preventDefault();
+          const t = e.touches[0];
+          this.handlePointerDown(t.clientX, t.clientY);
+        }
+      },
+      { passive: false }
+    );
+
+    canvas.addEventListener(
+      'touchmove',
+      (e) => {
+        if (e.touches.length > 0) {
+          e.preventDefault();
+          const t = e.touches[0];
+          this.handlePointerMove(t.clientX, t.clientY, false);
+        }
+      },
+      { passive: false }
+    );
+
+    canvas.addEventListener(
+      'touchend',
+      (e) => {
+        e.preventDefault();
+        const t = e.changedTouches[0];
+        this.handlePointerUp(t ? t.clientX : 0, t ? t.clientY : 0);
+      },
+      { passive: false }
+    );
+  }
+
+  private handlePointerDown(x: number, y: number): void {
+    this.closePopover();
+
+    // Verifica se clicou em cima de um elemento existente
+    const hitItem = this.findItemAt(x, y);
+
+    // Se a ferramenta atual é 'select', ou se clicou em um item já desenhado
+    if (this.tool === 'select' || (hitItem && this.tool !== 'pen')) {
+      if (hitItem) {
+        this.selectedItemId = hitItem.id;
+        this.isDraggingItem = true;
+        this.dragStartX = x;
+        this.dragStartY = y;
+        if (this.canvas) this.canvas.style.cursor = 'grabbing';
+        this.redraw();
         return;
       }
+      this.selectedItemId = null;
+      this.redraw();
+      if (this.tool === 'select') return;
+    }
 
-      if (!this.isMouseDown) return;
-      this.isMouseDown = false;
+    if (this.tool === 'text') {
+      this.openTextInput(x, y);
+      return;
+    }
 
-      const sx = this.activeDrawStart.x;
-      const sy = this.activeDrawStart.y;
+    this.isMouseDown = true;
+    this.activeDrawStart = { x, y };
+    this.dragStartX = x;
+    this.dragStartY = y;
 
+    if (this.tool === 'pen') {
+      this.activePoints = [{ x, y }];
+    }
+  }
+
+  private handlePointerMove(x: number, y: number, isHoverCheck: boolean): void {
+    // 1. Se estiver arrastando um elemento existente
+    if (this.isDraggingItem && this.selectedItemId) {
+      const item = this.items.find((it) => it.id === this.selectedItemId);
+      if (item) {
+        const dx = x - this.dragStartX;
+        const dy = y - this.dragStartY;
+        this.dragStartX = x;
+        this.dragStartY = y;
+
+        item.x1 += dx;
+        item.y1 += dy;
+        item.x2 += dx;
+        item.y2 += dy;
+
+        if (item.points) {
+          item.points.forEach((p) => {
+            p.x += dx;
+            p.y += dy;
+          });
+        }
+
+        this.redraw();
+        return;
+      }
+    }
+
+    // 2. Se estiver desenhando um novo elemento
+    if (this.isMouseDown) {
       if (this.tool === 'pen') {
-        if (this.activePoints.length > 1) {
-          const newItem: AnnotationItem = {
-            id: `item_${Date.now()}_${Math.random()}`,
-            type: 'pen',
-            color: this.color,
-            x1: sx,
-            y1: sy,
-            x2: x,
-            y2: y,
-            points: [...this.activePoints]
-          };
-          this.items.push(newItem);
-          this.selectedItemId = newItem.id;
-          this.recordHistory();
-        }
-        this.activePoints = [];
+        this.activePoints.push({ x, y });
         this.redraw();
+        // Linha ativa
+        this.drawLivePen(this.activePoints, this.color);
       } else if (this.tool === 'rect') {
-        if (Math.hypot(x - sx, y - sy) >= 4) {
-          const newItem: AnnotationItem = {
-            id: `item_${Date.now()}_${Math.random()}`,
-            type: 'rect',
-            color: this.color,
-            x1: sx,
-            y1: sy,
-            x2: x,
-            y2: y
-          };
-          this.items.push(newItem);
-          this.selectedItemId = newItem.id;
-          this.recordHistory();
-        }
         this.redraw();
+        this.drawLiveRect(this.activeDrawStart.x, this.activeDrawStart.y, x, y, this.color);
       } else if (this.tool === 'arrow') {
-        if (Math.hypot(x - sx, y - sy) >= 6) {
-          const newItem: AnnotationItem = {
-            id: `item_${Date.now()}_${Math.random()}`,
-            type: 'arrow',
-            color: this.color,
-            x1: sx,
-            y1: sy,
-            x2: x,
-            y2: y
-          };
-          this.items.push(newItem);
-          this.selectedItemId = newItem.id;
-          this.recordHistory();
-        }
         this.redraw();
+        this.drawLiveArrow(this.activeDrawStart.x, this.activeDrawStart.y, x, y, this.color);
       } else if (this.tool === 'ruler') {
-        if (Math.hypot(x - sx, y - sy) < 4) {
-          this.redraw();
-          return;
-        }
+        this.redraw();
+        this.drawLiveRuler(this.activeDrawStart.x, this.activeDrawStart.y, x, y, this.color);
+      }
+      return;
+    }
 
-        const dx = x - sx;
-        const dy = y - sy;
-        const absDx = Math.round(Math.abs(dx));
-        const absDy = Math.round(Math.abs(dy));
+    // 3. Hover: atualiza cursor conforme proximidade de itens (apenas mouse)
+    if (isHoverCheck && this.canvas) {
+      if (this.tool === 'select') {
+        const hit = this.findItemAt(x, y);
+        this.canvas.style.cursor = hit ? 'grab' : 'default';
+      } else {
+        const hit = this.findItemAt(x, y);
+        this.canvas.style.cursor = hit ? 'grab' : 'crosshair';
+      }
+    }
+  }
 
-        let defaultNote = '';
-        let label = '';
-        if (absDy >= absDx) {
-          const dir = dy >= 0 ? 'bottom' : 'top';
-          defaultNote = `mudar isso ${absDy}px para ${dir}`;
-          label = `${absDy}px ${dy >= 0 ? '↓' : '↑'} ${dir}`;
-        } else {
-          const dir = dx >= 0 ? 'right' : 'left';
-          defaultNote = `mudar isso ${absDx}px para ${dir}`;
-          label = `${absDx}px ${dx >= 0 ? '→' : '←'} ${dir}`;
-        }
+  private handlePointerUp(x: number, y: number): void {
+    if (this.isDraggingItem) {
+      this.isDraggingItem = false;
+      if (this.canvas) this.canvas.style.cursor = 'grab';
+      this.recordHistory();
+      return;
+    }
 
+    if (!this.isMouseDown) return;
+    this.isMouseDown = false;
+
+    const sx = this.activeDrawStart.x;
+    const sy = this.activeDrawStart.y;
+
+    if (this.tool === 'pen') {
+      if (this.activePoints.length > 1) {
         const newItem: AnnotationItem = {
           id: `item_${Date.now()}_${Math.random()}`,
-          type: 'ruler',
+          type: 'pen',
           color: this.color,
           x1: sx,
           y1: sy,
           x2: x,
           y2: y,
-          note: defaultNote,
-          label
+          points: [...this.activePoints]
         };
         this.items.push(newItem);
         this.selectedItemId = newItem.id;
         this.recordHistory();
-        this.redraw();
-
-        // Abre popover rápido para o QA personalizar a mensagem
-        this.openRulerConfirmPopover(newItem);
       }
-    });
+      this.activePoints = [];
+      this.redraw();
+    } else if (this.tool === 'rect') {
+      if (Math.hypot(x - sx, y - sy) >= 4) {
+        const newItem: AnnotationItem = {
+          id: `item_${Date.now()}_${Math.random()}`,
+          type: 'rect',
+          color: this.color,
+          x1: sx,
+          y1: sy,
+          x2: x,
+          y2: y
+        };
+        this.items.push(newItem);
+        this.selectedItemId = newItem.id;
+        this.recordHistory();
+      }
+      this.redraw();
+    } else if (this.tool === 'arrow') {
+      if (Math.hypot(x - sx, y - sy) >= 6) {
+        const newItem: AnnotationItem = {
+          id: `item_${Date.now()}_${Math.random()}`,
+          type: 'arrow',
+          color: this.color,
+          x1: sx,
+          y1: sy,
+          x2: x,
+          y2: y
+        };
+        this.items.push(newItem);
+        this.selectedItemId = newItem.id;
+        this.recordHistory();
+      }
+      this.redraw();
+    } else if (this.tool === 'ruler') {
+      if (Math.hypot(x - sx, y - sy) < 4) {
+        this.redraw();
+        return;
+      }
+
+      const dx = x - sx;
+      const dy = y - sy;
+      const absDx = Math.round(Math.abs(dx));
+      const absDy = Math.round(Math.abs(dy));
+
+      let defaultNote = '';
+      let label = '';
+      if (absDy >= absDx) {
+        const dir = dy >= 0 ? 'bottom' : 'top';
+        defaultNote = `mudar isso ${absDy}px para ${dir}`;
+        label = `${absDy}px ${dy >= 0 ? '↓' : '↑'} ${dir}`;
+      } else {
+        const dir = dx >= 0 ? 'right' : 'left';
+        defaultNote = `mudar isso ${absDx}px para ${dir}`;
+        label = `${absDx}px ${dx >= 0 ? '→' : '←'} ${dir}`;
+      }
+
+      const newItem: AnnotationItem = {
+        id: `item_${Date.now()}_${Math.random()}`,
+        type: 'ruler',
+        color: this.color,
+        x1: sx,
+        y1: sy,
+        x2: x,
+        y2: y,
+        note: defaultNote,
+        label
+      };
+      this.items.push(newItem);
+      this.selectedItemId = newItem.id;
+      this.recordHistory();
+      this.redraw();
+
+      // Abre popover rápido para o QA personalizar a mensagem
+      this.openRulerConfirmPopover(newItem);
+    }
   }
 
   private getToolBtnStyle(isActive: boolean): string {
@@ -937,7 +1013,7 @@ export class ScreenAnnotator {
     popover.setAttribute('data-backtrack-ignore', 'true');
     popover.style.cssText = `
       position: fixed;
-      left: ${Math.min(window.innerWidth - 320, Math.max(20, midX - 140))}px;
+      left: ${Math.max(10, Math.min(window.innerWidth - 280, midX - 140))}px;
       top: ${Math.min(window.innerHeight - 80, Math.max(70, midY + 28))}px;
       background: #0f172a;
       border: 1px solid #3b82f6;
@@ -947,13 +1023,15 @@ export class ScreenAnnotator {
       display: flex;
       align-items: center;
       gap: 6px;
+      max-width: calc(100vw - 20px);
+      box-sizing: border-box;
       z-index: 2147483648;
     `;
 
     popover.innerHTML = `
-      <input type="text" id="ruler-note-input" value="${item.note || ''}" style="background: #1e293b; color: #fff; border: 1px solid #334155; border-radius: 4px; padding: 4px 8px; font-size: 12px; width: 210px; outline: none;" />
-      <button type="button" id="btn-ruler-confirm" style="background: #10b981; color: white; border: none; border-radius: 4px; padding: 4px 8px; font-size: 12px; font-weight: bold; cursor: pointer;">✓</button>
-      <button type="button" id="btn-ruler-cancel" style="background: transparent; color: #94a3b8; border: none; padding: 4px; font-size: 12px; cursor: pointer;">✕</button>
+      <input type="text" id="ruler-note-input" value="${item.note || ''}" style="background: #1e293b; color: #fff; border: 1px solid #334155; border-radius: 4px; padding: 4px 8px; font-size: 12px; width: 100%; max-width: 210px; min-width: 140px; outline: none; box-sizing: border-box;" />
+      <button type="button" id="btn-ruler-confirm" style="background: #10b981; color: white; border: none; border-radius: 4px; padding: 4px 8px; font-size: 12px; font-weight: bold; cursor: pointer; flex-shrink: 0;">✓</button>
+      <button type="button" id="btn-ruler-cancel" style="background: transparent; color: #94a3b8; border: none; padding: 4px; font-size: 12px; cursor: pointer; flex-shrink: 0;">✕</button>
     `;
 
     this.overlay.appendChild(popover);
@@ -1008,7 +1086,7 @@ export class ScreenAnnotator {
     inputWrap.setAttribute('data-backtrack-ignore', 'true');
     inputWrap.style.cssText = `
       position: fixed;
-      left: ${Math.min(window.innerWidth - 260, Math.max(20, x))}px;
+      left: ${Math.max(10, Math.min(window.innerWidth - 240, x))}px;
       top: ${Math.min(window.innerHeight - 60, Math.max(60, y))}px;
       background: #0f172a;
       border: 1px solid ${this.color};
@@ -1018,13 +1096,15 @@ export class ScreenAnnotator {
       display: flex;
       align-items: center;
       gap: 6px;
+      max-width: calc(100vw - 20px);
+      box-sizing: border-box;
       z-index: 2147483648;
     `;
 
     inputWrap.innerHTML = `
-      <input type="text" id="canvas-text-input" placeholder="Digite a anotação..." style="background: #1e293b; color: #fff; border: 1px solid #334155; border-radius: 4px; padding: 4px 8px; font-size: 12px; width: 180px; outline: none;" />
-      <button type="button" id="btn-text-confirm" style="background: #10b981; color: white; border: none; border-radius: 4px; padding: 4px 8px; font-size: 12px; font-weight: bold; cursor: pointer;">✓</button>
-      <button type="button" id="btn-text-cancel" style="background: transparent; color: #94a3b8; border: none; padding: 4px; font-size: 12px; cursor: pointer;">✕</button>
+      <input type="text" id="canvas-text-input" placeholder="Digite a anotação..." style="background: #1e293b; color: #fff; border: 1px solid #334155; border-radius: 4px; padding: 4px 8px; font-size: 12px; width: 100%; max-width: 180px; min-width: 120px; outline: none; box-sizing: border-box;" />
+      <button type="button" id="btn-text-confirm" style="background: #10b981; color: white; border: none; border-radius: 4px; padding: 4px 8px; font-size: 12px; font-weight: bold; cursor: pointer; flex-shrink: 0;">✓</button>
+      <button type="button" id="btn-text-cancel" style="background: transparent; color: #94a3b8; border: none; padding: 4px; font-size: 12px; cursor: pointer; flex-shrink: 0;">✕</button>
     `;
 
     this.overlay.appendChild(inputWrap);

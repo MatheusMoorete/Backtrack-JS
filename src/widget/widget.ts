@@ -30,6 +30,7 @@ export class BacktrackWidget {
   private isExportingMarkdown = false;
   private exportModalError: string | null = null;
 
+  private wasDragged = false;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private handleGlobalKey?: (e: KeyboardEvent) => void;
 
@@ -186,11 +187,25 @@ export class BacktrackWidget {
     }
   }
 
+  private getViewerUrl(): string {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        const custom = localStorage.getItem('backtrack_viewer_url');
+        if (custom && custom.trim()) {
+          return custom.trim().replace(/\/+$/, '');
+        }
+      }
+    } catch {
+      // Ignora erro de acesso ao localStorage
+    }
+    return (this.options.defaultViewerUrl || DEFAULT_VIEWER_URL).replace(/\/+$/, '');
+  }
+
   private isCheckingViewer = false;
   private async checkViewerOnline(): Promise<boolean> {
     if (this.isCheckingViewer) return this.isViewerOnline;
     this.isCheckingViewer = true;
-    const viewerUrl = this.options.defaultViewerUrl || DEFAULT_VIEWER_URL;
+    const viewerUrl = this.getViewerUrl();
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 1200);
@@ -335,7 +350,7 @@ export class BacktrackWidget {
         }
 
         const result = await uploadArtifactToGist(artifact, token);
-        const viewerUrl = this.options.defaultViewerUrl || DEFAULT_VIEWER_URL;
+        const viewerUrl = this.getViewerUrl();
         replayUrl = `${viewerUrl}/?gist=${result.gistId}`;
 
         const offsetSec = Math.floor(
@@ -402,7 +417,7 @@ export class BacktrackWidget {
     try {
       const artifact = await this.recorder.getArtifact(incidentId);
       const result = await uploadArtifactToGist(artifact, token);
-      const viewerUrl = this.options.defaultViewerUrl || DEFAULT_VIEWER_URL;
+      const viewerUrl = this.getViewerUrl();
       const shareableUrl = `${viewerUrl}/?gist=${result.gistId}`;
 
       if (typeof navigator !== 'undefined' && navigator.clipboard) {
@@ -481,7 +496,7 @@ export class BacktrackWidget {
   }
 
   private openInViewer(artifact: FlightRecorderArtifactV1): void {
-    const viewerUrl = this.options.defaultViewerUrl || DEFAULT_VIEWER_URL;
+    const viewerUrl = this.getViewerUrl();
     const win = window.open(viewerUrl, 'backtrack_viewer');
     if (!win) {
       alert('Pop-up bloqueado. Permita pop-ups para abrir o visualizador.');
@@ -613,7 +628,20 @@ export class BacktrackWidget {
                 <div class="backtrack-panel-subtitle">
                   <span class="backtrack-viewer-status-wrap">
                     <span class="backtrack-status-dot ${this.isViewerOnline ? 'backtrack-status-online' : 'backtrack-status-offline'}"></span>
-                    ${this.isViewerOnline ? 'Visualizador online' : 'Visualizador offline'} • ${this.formatBytes(this.health?.storageBytes ?? 0)}
+                    ${this.isViewerOnline ? 'Visualizador online' : 'Visualizador offline'}
+                    <button
+                      type="button"
+                      class="backtrack-config-viewer-btn"
+                      id="btn-config-viewer-url"
+                      title="Configurar URL do Visualizador (ex: túnel Cloudflare). Atual: ${this.getViewerUrl()}"
+                      aria-label="Configurar URL do Visualizador"
+                    >
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 20h9" />
+                        <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                      </svg>
+                    </button>
+                    • ${this.formatBytes(this.health?.storageBytes ?? 0)}
                     <span
                       class="backtrack-storage-tooltip-trigger"
                       title="Os dados de replay são armazenados localmente no IndexedDB do seu navegador. O limite máximo é de 50 MB (gravações antigas são recicladas automaticamente)."
@@ -915,8 +943,22 @@ export class BacktrackWidget {
       if (statusWrap) {
         statusWrap.innerHTML = `
           <span class="backtrack-status-dot ${this.isViewerOnline ? 'backtrack-status-online' : 'backtrack-status-offline'}"></span>
-          ${this.isViewerOnline ? 'Visualizador online' : 'Visualizador offline'} • ${this.formatBytes(this.health?.storageBytes ?? 0)}
+          ${this.isViewerOnline ? 'Visualizador online' : 'Visualizador offline'}
+          <button
+            type="button"
+            class="backtrack-config-viewer-btn"
+            id="btn-config-viewer-url"
+            title="Configurar URL do Visualizador (ex: túnel Cloudflare). Atual: ${this.getViewerUrl()}"
+            aria-label="Configurar URL do Visualizador"
+          >
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 20h9" />
+              <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+            </svg>
+          </button>
+          • ${this.formatBytes(this.health?.storageBytes ?? 0)}
         `;
+        this.attachConfigViewerListener();
       }
 
       const titleCount = this.shadow.getElementById('backtrack-saved-count-title');
@@ -1027,11 +1069,73 @@ export class BacktrackWidget {
   private attachEventListeners(): void {
     if (!this.shadow) return;
 
-    this.shadow.getElementById('btn-launcher')?.addEventListener('click', () => {
-      this.toggleOpen();
-    });
+    const launcher = this.shadow.getElementById('btn-launcher');
+    if (launcher) {
+      let touchStartX = 0;
+      let touchStartY = 0;
+      let initialLeft = 0;
+      let initialTop = 0;
+      let hasMoved = false;
+
+      launcher.addEventListener(
+        'touchstart',
+        (e) => {
+          if (e.touches.length === 1 && this.container) {
+            const t = e.touches[0];
+            touchStartX = t.clientX;
+            touchStartY = t.clientY;
+            const rect = this.container.getBoundingClientRect();
+            initialLeft = rect.left;
+            initialTop = rect.top;
+            hasMoved = false;
+          }
+        },
+        { passive: true }
+      );
+
+      launcher.addEventListener(
+        'touchmove',
+        (e) => {
+          if (e.touches.length === 1 && this.container) {
+            const t = e.touches[0];
+            const dx = t.clientX - touchStartX;
+            const dy = t.clientY - touchStartY;
+            if (Math.hypot(dx, dy) > 6) {
+              hasMoved = true;
+              const newLeft = Math.max(8, Math.min(window.innerWidth - 46, initialLeft + dx));
+              const newTop = Math.max(8, Math.min(window.innerHeight - 46, initialTop + dy));
+              this.container.style.left = `${newLeft}px`;
+              this.container.style.top = `${newTop}px`;
+              this.container.style.bottom = 'auto';
+              this.container.style.right = 'auto';
+            }
+          }
+        },
+        { passive: true }
+      );
+
+      launcher.addEventListener('touchend', () => {
+        if (hasMoved) {
+          this.wasDragged = true;
+          setTimeout(() => {
+            this.wasDragged = false;
+          }, 150);
+        }
+      });
+
+      launcher.addEventListener('click', (e) => {
+        if (this.wasDragged) {
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
+        this.toggleOpen();
+      });
+    }
 
     if (this.isOpen) {
+      this.attachConfigViewerListener();
+
       this.shadow.getElementById('btn-close')?.addEventListener('click', () => {
         this.toggleOpen();
       });
@@ -1111,6 +1215,36 @@ export class BacktrackWidget {
           }
         }
       });
+    }
+  }
+
+  private attachConfigViewerListener(): void {
+    if (!this.shadow) return;
+    const btn = this.shadow.getElementById('btn-config-viewer-url');
+    if (btn) {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        const current = this.getViewerUrl();
+        const entered = prompt(
+          'URL do Backtrack Viewer (ex: https://meu-tunnel.trycloudflare.com ou http://localhost:5173):',
+          current
+        );
+        if (entered !== null) {
+          const trimmed = entered.trim();
+          try {
+            if (trimmed) {
+              localStorage.setItem('backtrack_viewer_url', trimmed);
+            } else {
+              localStorage.removeItem('backtrack_viewer_url');
+            }
+          } catch {
+            // Ignora erro de localStorage
+          }
+          this.isViewerOnline = false;
+          this.updateData();
+          this.render();
+        }
+      };
     }
   }
 }

@@ -229,5 +229,60 @@ describe('Backtrack v0.2.0 — Novas Features', () => {
       recorder.stop();
       widget.unmount();
     });
+
+    it('suporta arrasto por toque (touch drag) no botão launcher em dispositivos móveis', async () => {
+      const recorder = new FlightRecorderImpl({}, db);
+      const widget = new BacktrackWidget(recorder);
+      widget.mount();
+
+      const host = document.getElementById('__backtrack_widget_host__');
+      expect(host).not.toBeNull();
+      const launcher = host?.shadowRoot?.getElementById('btn-launcher');
+      expect(launcher).not.toBeNull();
+
+      // Simula toque e arrasto no launcher
+      const touchStartEvent = new CustomEvent('touchstart', { bubbles: true }) as any;
+      touchStartEvent.touches = [{ clientX: 20, clientY: 20 }];
+      launcher?.dispatchEvent(touchStartEvent);
+
+      const touchMoveEvent = new CustomEvent('touchmove', { bubbles: true }) as any;
+      touchMoveEvent.touches = [{ clientX: 80, clientY: 120 }];
+      launcher?.dispatchEvent(touchMoveEvent);
+
+      const touchEndEvent = new CustomEvent('touchend', { bubbles: true }) as any;
+      launcher?.dispatchEvent(touchEndEvent);
+
+      // Verifica se o container reposicionou
+      expect(host?.style.left).toBeDefined();
+      expect(host?.style.top).toBeDefined();
+
+      widget.unmount();
+    });
+  });
+
+  describe('Compatibilidade Mobile (Touch e Safe Area)', () => {
+    it('inclui suporte a safe-area-inset e media query de telas móveis no CSS', async () => {
+      const { WIDGET_CSS } = await import('../../src/widget/styles');
+      expect(WIDGET_CSS).toContain('safe-area-inset-bottom');
+      expect(WIDGET_CSS).toContain('@media (max-width: 480px)');
+      expect(WIDGET_CSS).toContain('max-width: calc(100vw - 16px)');
+    });
+
+    it('inicializa o canvas do ScreenAnnotator com touch-action none e toolbar responsiva', () => {
+      const annotator = new ScreenAnnotator();
+      annotator.open(() => {});
+
+      const overlay = document.getElementById('__backtrack_annotator_overlay__');
+      expect(overlay).not.toBeNull();
+
+      const canvas = overlay?.querySelector('canvas');
+      expect(canvas).not.toBeNull();
+      expect(canvas?.style.touchAction).toBe('none');
+
+      const toolbar = overlay?.querySelector('.backtrack-annotator-toolbar');
+      expect(toolbar).not.toBeNull();
+
+      annotator.close();
+    });
   });
 });

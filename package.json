@@ -33,7 +33,7 @@
     "gate:1": "tsx scripts/verify-lote1.ts",
     "gate:2": "tsx scripts/verify-lote2.ts",
     "gate:3": "tsx scripts/verify-lote3.ts",
-    "viewer": "vite viewer",
+    "viewer": "vite viewer --host",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [
