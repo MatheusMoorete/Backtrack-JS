@@ -212,15 +212,20 @@ export const ReplayPlayer: React.FC<ReplayPlayerProps> = ({
 
   // Seek direto com reconstrução imediata do frame de vídeo
   const seekTo = useCallback(
-    (offsetMs: number) => {
+    (offsetMs: number, forcePause = false) => {
       const clamped = Math.max(0, Math.min(totalDurationMs, offsetMs));
       lastAppliedOffsetRef.current = clamped;
       setTickerOffsetMs(clamped);
       onSeek(startedAt + clamped);
 
+      const willPlay = forcePause ? false : isPlaying;
+      if (forcePause && isPlaying) {
+        setIsPlaying(false);
+      }
+
       if (replayerRef.current) {
         try {
-          if (isPlaying) {
+          if (willPlay) {
             replayerRef.current.play(clamped);
           } else {
             // Em estado pausado, força o rrweb a reconstruir o DOM e exibir o frame imediatamente
@@ -293,33 +298,120 @@ export const ReplayPlayer: React.FC<ReplayPlayerProps> = ({
     seekTo(newOffset);
   };
 
-  // Identifica o timestamp exato do momento do erro / gatilho
-  const errorEvent = React.useMemo(() => {
-    return timelineEvents?.find(
-      (e) =>
-        e.type === 'error' ||
-        (e.type === 'network' && (e.result === 'error' || (e.status !== undefined && (e.status >= 400 || e.status === 0)))) ||
-        (e.type === 'console' && e.level === 'error')
-    );
+  // Identifica todos os erros reais da timeline (erros JS, rede 4xx/5xx/CORS, console.error)
+  const errorEvents = React.useMemo(() => {
+    if (!timelineEvents) return [];
+    return timelineEvents
+      .filter(
+        (e) =>
+          e.type === 'error' ||
+          (e.type === 'network' && (e.result === 'error' || (e.status !== undefined && (e.status >= 400 || e.status === 0)))) ||
+          (e.type === 'console' && e.level === 'error')
+      )
+      .sort((a, b) => a.timestamp - b.timestamp);
   }, [timelineEvents]);
 
+  const [jumpFeedback, setJumpFeedback] = useState<string | null>(null);
+
+  // Calcula o offset padrão do momento do erro
   const errorOffsetMs = React.useMemo(() => {
-    if (triggeredAt && triggeredAt >= startedAt) {
-      return Math.min(totalDurationMs, Math.max(0, triggeredAt - startedAt));
+    // 1. Prioridade máxima: primeiro erro real registrado na timeline
+    if (errorEvents.length > 0) {
+      return Math.max(0, Math.min(totalDurationMs, errorEvents[0].timestamp - startedAt));
     }
-    if (errorEvent) {
-      return Math.min(totalDurationMs, Math.max(0, errorEvent.timestamp - startedAt));
+    // 2. Segunda prioridade: se disparado por gatilho automático de erro antes do término
+    if (triggeredAt && triggeredAt >= startedAt && triggeredAt < finalizedAt) {
+      return Math.max(0, Math.min(totalDurationMs, triggeredAt - startedAt));
+    }
+    // 3. Fallback: momento do trigger ou término da gravação
+    if (triggeredAt && triggeredAt >= startedAt) {
+      return Math.max(0, Math.min(totalDurationMs, triggeredAt - startedAt));
     }
     return Math.min(totalDurationMs, Math.max(0, finalizedAt - startedAt));
-  }, [triggeredAt, startedAt, totalDurationMs, errorEvent, finalizedAt]);
+  }, [errorEvents, totalDurationMs, startedAt, triggeredAt, finalizedAt]);
 
   const handleJumpToError = useCallback(() => {
-    if (isPlaying && replayerRef.current) {
-      replayerRef.current.pause();
-      setIsPlaying(false);
+    if (replayerRef.current) {
+      try {
+        replayerRef.current.pause();
+      } catch {
+        // Noop
+      }
     }
-    seekTo(errorOffsetMs);
-  }, [isPlaying, seekTo, errorOffsetMs]);
+    setIsPlaying(false);
+
+    if (errorEvents.length > 0) {
+      const currentOffset = tickerOffsetMs ?? Math.max(0, currentTimeMs - startedAt);
+      // Pula para o próximo erro após a posição atual; se estiver no fim ou só tiver 1, vai para o primeiro
+      const nextIdx = errorEvents.findIndex((e) => e.timestamp - startedAt > currentOffset + 300);
+      const targetIdx = nextIdx !== -1 ? nextIdx : 0;
+      const targetEvt = errorEvents[targetIdx];
+      const targetOffset = Math.max(0, Math.min(totalDurationMs, targetEvt.timestamp - startedAt));
+
+      seekTo(targetOffset, true);
+
+      const desc =
+        targetEvt.type === 'error'
+          ? `${targetEvt.name}: ${targetEvt.message}`
+          : targetEvt.type === 'network'
+          ? `${targetEvt.method} ${targetEvt.url} (${targetEvt.status === 0 ? 'ERR' : targetEvt.status})`
+          : targetEvt.type === 'console'
+          ? targetEvt.args.join(' ')
+          : 'Erro registrado';
+
+      setJumpFeedback(
+        errorEvents.length > 1
+          ? `Erro ${targetIdx + 1} de ${errorEvents.length}: ${desc.slice(0, 35)}`
+          : `Erro: ${desc.slice(0, 38)}`
+      );
+      setTimeout(() => setJumpFeedback(null), 3500);
+    } else {
+      seekTo(errorOffsetMs, true);
+      setJumpFeedback('Nenhum erro de código ou rede detectado no log');
+      setTimeout(() => setJumpFeedback(null), 3500);
+    }
+  }, [errorEvents, tickerOffsetMs, currentTimeMs, startedAt, totalDurationMs, seekTo, errorOffsetMs]);
+
+  // Estado e manipuladores para o Tooltip flutuante de visualização na barra de progresso (Scrubber)
+  const [hoverPosition, setHoverPosition] = useState<{
+    percent: number;
+    offsetMs: number;
+    event?: TimelineEvent;
+  } | null>(null);
+
+  const handleScrubberMouseMove = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      const rect = e.currentTarget.getBoundingClientRect();
+      if (rect.width <= 0) return;
+      const x = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
+      const pct = (x / rect.width) * 100;
+      const offsetMs = Math.round((pct / 100) * totalDurationMs);
+      const hoverTime = startedAt + offsetMs;
+
+      let nearestEvent: TimelineEvent | undefined;
+      let minDiff = 1500;
+      if (timelineEvents) {
+        for (const ev of timelineEvents) {
+          const diff = Math.abs(ev.timestamp - hoverTime);
+          if (diff < minDiff) {
+            minDiff = diff;
+            nearestEvent = ev;
+          }
+        }
+      }
+
+      setHoverPosition({
+        percent: pct,
+        offsetMs,
+        event: nearestEvent
+      });
+    },
+    [totalDurationMs, startedAt, timelineEvents]
+  );
+
+  const handleScrubberMouseLeave = useCallback(() => {
+    setHoverPosition(null);
+  }, []);
 
   // Atalhos de teclado: Setas ou vírgula/ponto para passar frames, Espaço para play/pause
   useEffect(() => {
@@ -439,8 +531,47 @@ export const ReplayPlayer: React.FC<ReplayPlayerProps> = ({
       </div>
 
       <div className="player-controls-bar">
-        {/* Scrubber Track with Event Markers */}
-        <div className="scrubber-track-container" title="Clique ou arraste para buscar no tempo">
+        {/* Scrubber Track with Event Markers & Floating Hover Tooltip */}
+        <div
+          className="scrubber-track-container"
+          onMouseMove={handleScrubberMouseMove}
+          onMouseLeave={handleScrubberMouseLeave}
+        >
+          {/* Floating Hover Tooltip que acompanha o mouse ao longo da barra */}
+          {hoverPosition && (
+            <div
+              className="scrubber-hover-tooltip"
+              style={{ left: `${hoverPosition.percent}%` }}
+              role="tooltip"
+            >
+              <span className="tooltip-time">{formatTime(hoverPosition.offsetMs)}</span>
+              {hoverPosition.event && (
+                <span
+                  className={`tooltip-event ${
+                    hoverPosition.event.type === 'error' ||
+                    (hoverPosition.event.type === 'network' &&
+                      (hoverPosition.event.result === 'error' ||
+                        (hoverPosition.event.status !== undefined &&
+                          (hoverPosition.event.status >= 400 || hoverPosition.event.status === 0)))) ||
+                    (hoverPosition.event.type === 'console' && hoverPosition.event.level === 'error')
+                      ? 'is-error'
+                      : ''
+                  }`}
+                >
+                  {hoverPosition.event.type === 'error'
+                    ? `${hoverPosition.event.name}: ${hoverPosition.event.message}`
+                    : hoverPosition.event.type === 'network'
+                    ? `${hoverPosition.event.method} ${hoverPosition.event.url} (${hoverPosition.event.status === 0 ? 'ERR' : hoverPosition.event.status})`
+                    : hoverPosition.event.type === 'console'
+                    ? `[${hoverPosition.event.level}] ${hoverPosition.event.args.join(' ')}`
+                    : hoverPosition.event.type === 'navigation'
+                    ? `→ ${hoverPosition.event.toUrl}`
+                    : hoverPosition.event.type}
+                </span>
+              )}
+            </div>
+          )}
+
           <div className="scrubber-track-bg">
             <div
               className="scrubber-fill"
@@ -527,18 +658,29 @@ export const ReplayPlayer: React.FC<ReplayPlayerProps> = ({
             {/* Pular direto para o erro */}
             <button
               type="button"
-              className="btn-jump-error"
+              className={`btn-jump-error ${errorEvents.length === 0 ? 'is-no-error' : ''}`}
               onClick={handleJumpToError}
               aria-label="Pular para o momento do erro"
-              title={`Ir direto para o momento do erro (${formatTime(errorOffsetMs)})`}
+              title={
+                errorEvents.length > 0
+                  ? `Ir direto para o momento do erro (${errorEvents.length} erro${errorEvents.length > 1 ? 's' : ''})`
+                  : `Ir direto para o momento do erro (${formatTime(errorOffsetMs)})`
+              }
             >
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
                 <line x1="12" y1="9" x2="12" y2="13" />
                 <line x1="12" y1="17" x2="12.01" y2="17" />
               </svg>
-              <span>Ir para o erro</span>
+              <span>{errorEvents.length > 1 ? `Erros (${errorEvents.length})` : 'Ir para o erro'}</span>
             </button>
+
+            {/* Feedback toast de salto para erro */}
+            {jumpFeedback && (
+              <span className="jump-feedback-toast" role="status">
+                {jumpFeedback}
+              </span>
+            )}
 
             {/* Pulos de tempo e frames */}
             <div className="step-buttons-group">
