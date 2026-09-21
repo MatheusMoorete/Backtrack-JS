@@ -161,6 +161,13 @@ export const WIDGET_CSS = `
   gap: 4px;
 }
 
+.backtrack-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.backtrack-hide-btn,
 .backtrack-close-btn {
   background-color: transparent;
   border: 1px solid #334155;
@@ -170,12 +177,19 @@ export const WIDGET_CSS = `
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 500;
   cursor: pointer;
   color: #94a3b8;
-  transition: background-color 0.1s ease, color 0.1s ease;
+  transition: background-color 0.1s ease, color 0.1s ease, border-color 0.1s ease;
   outline: none;
+}
+
+.backtrack-hide-btn:hover,
+.backtrack-close-btn:hover {
+  background-color: #1e293b;
+  border-color: #475569;
+  color: #f8fafc;
 }
 
 .backtrack-close-btn:hover {
@@ -189,6 +203,43 @@ export const WIDGET_CSS = `
   padding: 12px 14px;
   overflow-y: auto;
   flex: 1;
+  scrollbar-width: thin;
+  scrollbar-color: #334155 transparent;
+}
+
+.backtrack-panel-body::-webkit-scrollbar {
+  width: 5px;
+}
+
+.backtrack-panel-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.backtrack-panel-body::-webkit-scrollbar-thumb {
+  background-color: #334155;
+  border-radius: 4px;
+}
+
+.backtrack-panel-body::-webkit-scrollbar-thumb:hover {
+  background-color: #475569;
+}
+
+.backtrack-storage-tooltip-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #64748b;
+  cursor: help;
+  user-select: none;
+  border-radius: 50%;
+  padding: 1px;
+  margin-left: 2px;
+  vertical-align: middle;
+  transition: color 0.15s ease;
+}
+
+.backtrack-storage-tooltip-trigger:hover {
+  color: #38bdf8;
 }
 
 /* Alertas de Feedback */

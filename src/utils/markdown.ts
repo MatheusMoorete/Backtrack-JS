@@ -42,6 +42,16 @@ export function formatIncidentMarkdown(artifact: FlightRecorderArtifactV1): stri
     lines.push('- **Falhas de Rede:** Nenhuma requisição HTTP 4xx/5xx');
   }
 
+  if (artifact.incident.annotationImage) {
+    const triggerNotes = artifact.incident.triggers?.find((t) => t.detail?.notes)?.detail?.notes as string | undefined;
+    const notes = (artifact.incident.annotations?.notes as string) || triggerNotes;
+    if (notes) {
+      lines.push(`- **Anotações do QA:** 🎨 \`${notes}\``);
+    } else {
+      lines.push('- **Anotações do QA:** 🎨 Anotação visual gravada no artefato');
+    }
+  }
+
   lines.push('', '*Gerado automaticamente pelo Backtrack.*');
 
   return lines.join('\n');

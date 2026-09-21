@@ -5,6 +5,7 @@ import type { FlightRecorderArtifactV1 } from '../types/artifact';
 import { WIDGET_CSS } from './styles';
 import { ScreenAnnotator } from './annotator';
 import { formatIncidentMarkdown } from '../utils/markdown';
+import { uploadArtifactToGist } from '../utils/gist-uploader';
 
 export const DEFAULT_VIEWER_URL = 'http://localhost:5173';
 
@@ -25,6 +26,7 @@ export class BacktrackWidget {
   private isCustomDuration = false;
 
   private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private handleGlobalKey?: (e: KeyboardEvent) => void;
 
   constructor(recorder: FlightRecorder, options?: WidgetOptions) {
     this.recorder = recorder;
@@ -41,17 +43,54 @@ export class BacktrackWidget {
     // Cria elemento hospedeiro com Shadow DOM para isolamento total de CSS
     const host = document.createElement('div');
     host.id = '__backtrack_widget_host__';
+    host.className = 'backtrack-ignore backtrack-block rr-ignore rr-block';
+    host.setAttribute('data-rr-ignore', 'true');
+    host.setAttribute('data-backtrack-ignore', 'true');
     this.applyHostPosition(host);
+
+    try {
+      if (typeof localStorage !== 'undefined' && localStorage.getItem('backtrack_widget_hidden') === 'true') {
+        host.style.display = 'none';
+      }
+    } catch {
+      // Ignora erro de acesso ao localStorage
+    }
 
     this.shadow = host.attachShadow({ mode: 'open' });
     this.container = host;
     document.body.appendChild(host);
+
+    // Atalho global para alternar visibilidade (Ctrl+Shift+B ou Cmd+Shift+B) e fechar com Escape
+    this.handleGlobalKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' || e.key === 'Esc') {
+        if (this.openMenuId) {
+          e.preventDefault();
+          this.openMenuId = null;
+          this.updateMenuVisibility();
+          return;
+        }
+        if (this.isOpen) {
+          e.preventDefault();
+          this.toggleOpen();
+          return;
+        }
+      }
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'B' || e.key === 'b')) {
+        e.preventDefault();
+        this.toggle();
+      }
+    };
+    window.addEventListener('keydown', this.handleGlobalKey);
 
     this.render();
     this.updateData();
   }
 
   public unmount(): void {
+    if (this.handleGlobalKey && typeof window !== 'undefined') {
+      window.removeEventListener('keydown', this.handleGlobalKey);
+      this.handleGlobalKey = undefined;
+    }
     if (this.pollTimer) {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
@@ -61,6 +100,60 @@ export class BacktrackWidget {
     }
     this.container = null;
     this.shadow = null;
+  }
+
+  public hide(): void {
+    if (this.container) {
+      this.container.style.display = 'none';
+    }
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('backtrack_widget_hidden', 'true');
+      }
+    } catch {
+      // Ignora
+    }
+    console.log(
+      '%c[Backtrack]%c Widget ocultado. Para reexibir, use %cBacktrack.show()%c no console ou tecle %cCtrl+Shift+B%c.',
+      'color: #38bdf8; font-weight: bold;',
+      'color: inherit;',
+      'color: #22c55e; font-weight: bold;',
+      'color: inherit;',
+      'color: #f59e0b; font-weight: bold;',
+      'color: inherit;'
+    );
+  }
+
+  public show(): void {
+    if (this.container) {
+      this.container.style.display = '';
+    }
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem('backtrack_widget_hidden');
+      }
+    } catch {
+      // Ignora
+    }
+    console.log('%c[Backtrack]%c Widget exibido!', 'color: #38bdf8; font-weight: bold;', 'color: inherit;');
+  }
+
+  public toggle(): boolean {
+    const isCurrentlyHidden =
+      this.container?.style.display === 'none' ||
+      (typeof localStorage !== 'undefined' && localStorage.getItem('backtrack_widget_hidden') === 'true');
+    if (isCurrentlyHidden) {
+      this.show();
+      return true;
+    } else {
+      this.hide();
+      return false;
+    }
+  }
+
+  public isVisible(): boolean {
+    if (!this.container) return false;
+    return this.container.style.display !== 'none';
   }
 
   private applyHostPosition(host: HTMLElement): void {
@@ -158,7 +251,7 @@ export class BacktrackWidget {
 
   private async handleViewIncident(incidentId: string): Promise<void> {
     try {
-      const artifact = await this.recorder.exportIncident(incidentId);
+      const artifact = await this.recorder.getArtifact(incidentId);
       this.openInViewer(artifact);
     } catch {
       alert('Não foi possível carregar o artefato do incidente.');
@@ -199,6 +292,59 @@ export class BacktrackWidget {
     }
   }
 
+  private async handleShareGist(incidentId: string): Promise<void> {
+    let token = typeof localStorage !== 'undefined' ? localStorage.getItem('backtrack_github_token') : null;
+
+    if (!token || !token.trim()) {
+      const prompted = prompt(
+        'Insira seu GitHub Personal Access Token (com permissão "gist") para gerar o link compartilhado:'
+      );
+      if (!prompted || !prompted.trim()) {
+        return;
+      }
+      token = prompted.trim();
+      try {
+        localStorage.setItem('backtrack_github_token', token);
+      } catch {
+        // Ignora
+      }
+    }
+
+    this.alertMessage = 'Enviando incidente para o GitHub Gist...';
+    this.render();
+
+    try {
+      const artifact = await this.recorder.getArtifact(incidentId);
+      const result = await uploadArtifactToGist(artifact, token);
+      const viewerUrl = this.options.defaultViewerUrl || DEFAULT_VIEWER_URL;
+      const shareableUrl = `${viewerUrl}/?gist=${result.gistId}`;
+
+      if (typeof navigator !== 'undefined' && navigator.clipboard) {
+        await navigator.clipboard.writeText(shareableUrl);
+        this.alertMessage = 'Link compartilhado copiado para a área de transferência!';
+      } else {
+        prompt('Link compartilhado gerado com sucesso:', shareableUrl);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes('401')) {
+        try {
+          localStorage.removeItem('backtrack_github_token');
+        } catch {
+          // Ignora
+        }
+      }
+      alert(`Falha ao compartilhar replay: ${msg}`);
+      this.alertMessage = 'Falha ao gerar link compartilhado.';
+    } finally {
+      this.render();
+      setTimeout(() => {
+        this.alertMessage = null;
+        this.render();
+      }, 4000);
+    }
+  }
+
   private handleAnnotate(): void {
     this.isOpen = false;
     this.render();
@@ -217,7 +363,13 @@ export class BacktrackWidget {
         this.alertMessage = 'Gravando incidente com anotação visual...';
         this.render();
 
-        await this.recorder.capture('Anotação visual de bug na tela', this.selectedDurationSeconds);
+        const reason = result.notes?.trim()
+          ? `Anotação do QA: ${result.notes.trim()}`
+          : 'Anotação visual de bug na tela';
+        await this.recorder.capture(reason, this.selectedDurationSeconds, {
+          annotationImage: result.dataUrl,
+          notes: result.notes
+        });
         await this.updateData();
         this.alertMessage = 'Incidente com anotação visual gravado com sucesso!';
       } catch (err) {
@@ -376,10 +528,35 @@ export class BacktrackWidget {
                   <span class="backtrack-viewer-status-wrap">
                     <span class="backtrack-status-dot ${this.isViewerOnline ? 'backtrack-status-online' : 'backtrack-status-offline'}"></span>
                     ${this.isViewerOnline ? 'Visualizador online' : 'Visualizador offline'} • ${this.formatBytes(this.health?.storageBytes ?? 0)}
+                    <span
+                      class="backtrack-storage-tooltip-trigger"
+                      title="Os dados de replay são armazenados localmente no IndexedDB do seu navegador. O limite máximo é de 50 MB (gravações antigas são recicladas automaticamente)."
+                      aria-label="Informações sobre o armazenamento local no IndexedDB"
+                    >
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10" />
+                        <line x1="12" y1="16" x2="12" y2="12" />
+                        <line x1="12" y1="8" x2="12.01" y2="8" />
+                      </svg>
+                    </span>
                   </span>
                 </div>
               </div>
-              <button type="button" class="backtrack-close-btn" id="btn-close" aria-label="Fechar painel">×</button>
+              <div class="backtrack-header-actions">
+                <button
+                  type="button"
+                  class="backtrack-hide-btn"
+                  id="btn-hide-widget"
+                  title="Ocultar ícone da tela (Para reexibir: Ctrl+Shift+B ou execute Backtrack.show() no console)"
+                  aria-label="Ocultar ícone da tela"
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+                    <line x1="1" y1="1" x2="23" y2="23" />
+                  </svg>
+                </button>
+                <button type="button" class="backtrack-close-btn" id="btn-close" aria-label="Fechar painel">×</button>
+              </div>
             </div>
 
             <div class="backtrack-panel-body">
@@ -528,15 +705,35 @@ export class BacktrackWidget {
                 </svg>
               </button>
               <div class="backtrack-dropdown-menu ${this.openMenuId === inc.id ? 'is-open' : ''}" id="menu-${inc.id}">
+                <button type="button" class="backtrack-dropdown-item" data-share-gist-id="${inc.id}">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                  </svg>
+                  <span>Gerar Link (Gist)</span>
+                </button>
                 <button type="button" class="backtrack-dropdown-item" data-download-id="${inc.id}">
-                  <span>⬇ Baixar (.ffr.json)</span>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                  <span>Baixar (.ffr.json)</span>
                 </button>
                 <button type="button" class="backtrack-dropdown-item" data-copy-id="${inc.id}">
-                  <span>📋 Copiar Markdown</span>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                  </svg>
+                  <span>Copiar Markdown</span>
                 </button>
                 <div class="backtrack-dropdown-divider"></div>
                 <button type="button" class="backtrack-dropdown-item is-danger" data-delete-id="${inc.id}">
-                  <span>✕ Excluir</span>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                  <span>Excluir</span>
                 </button>
               </div>
             </div>
@@ -663,6 +860,16 @@ export class BacktrackWidget {
       });
     });
 
+    this.shadow.querySelectorAll('[data-share-gist-id]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = (e.currentTarget as HTMLElement).getAttribute('data-share-gist-id');
+        this.openMenuId = null;
+        this.updateMenuVisibility();
+        if (id) this.handleShareGist(id);
+      });
+    });
+
     this.shadow.querySelectorAll('[data-download-id]').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -704,6 +911,10 @@ export class BacktrackWidget {
     if (this.isOpen) {
       this.shadow.getElementById('btn-close')?.addEventListener('click', () => {
         this.toggleOpen();
+      });
+
+      this.shadow.getElementById('btn-hide-widget')?.addEventListener('click', () => {
+        this.hide();
       });
 
       this.shadow.getElementById('btn-duration-60')?.addEventListener('click', () => {

@@ -17,6 +17,7 @@ import { BacktrackWidget } from '../widget/widget';
 import type {
   FlightRecorder,
   FlightRecorderOptions,
+  CaptureOptions,
   ErrorContext
 } from '../types/options';
 import type { RecorderHealth } from '../types/health';
@@ -87,7 +88,79 @@ export class FlightRecorderImpl implements FlightRecorder {
     const recorder = new FlightRecorderImpl(options, customDb);
     await recorder.start();
     FlightRecorderImpl.activeInstance = recorder;
+
+    if (typeof window !== 'undefined') {
+      const win = window as any;
+      win.Backtrack = FlightRecorderImpl;
+      win.flightRecorder = recorder;
+      win.hideBacktrack = () => FlightRecorderImpl.hideWidget();
+      win.showBacktrack = () => FlightRecorderImpl.showWidget();
+      win.toggleBacktrack = () => FlightRecorderImpl.toggleWidget();
+    }
+
     return recorder;
+  }
+
+  public static hideWidget(): void {
+    const inst = FlightRecorderImpl.activeInstance;
+    if (inst?.widget) {
+      inst.widget.hide();
+    } else {
+      try {
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem('backtrack_widget_hidden', 'true');
+        }
+        if (typeof document !== 'undefined') {
+          const el = document.getElementById('__backtrack_widget_host__');
+          if (el) el.style.display = 'none';
+        }
+      } catch {}
+    }
+  }
+
+  public static showWidget(): void {
+    const inst = FlightRecorderImpl.activeInstance;
+    if (inst?.widget) {
+      inst.widget.show();
+    } else {
+      try {
+        if (typeof localStorage !== 'undefined') {
+          localStorage.removeItem('backtrack_widget_hidden');
+        }
+        if (typeof document !== 'undefined') {
+          const el = document.getElementById('__backtrack_widget_host__');
+          if (el) el.style.display = '';
+        }
+      } catch {}
+    }
+  }
+
+  public static toggleWidget(): boolean {
+    const inst = FlightRecorderImpl.activeInstance;
+    if (inst?.widget) {
+      return inst.widget.toggle();
+    }
+    const isHidden =
+      typeof localStorage !== 'undefined' && localStorage.getItem('backtrack_widget_hidden') === 'true';
+    if (isHidden) {
+      FlightRecorderImpl.showWidget();
+      return true;
+    } else {
+      FlightRecorderImpl.hideWidget();
+      return false;
+    }
+  }
+
+  public static hide(): void {
+    FlightRecorderImpl.hideWidget();
+  }
+
+  public static show(): void {
+    FlightRecorderImpl.showWidget();
+  }
+
+  public static toggle(): boolean {
+    return FlightRecorderImpl.toggleWidget();
   }
 
   public static resetInstance(): void {
@@ -99,6 +172,29 @@ export class FlightRecorderImpl implements FlightRecorder {
 
   public static getInstance(): FlightRecorderImpl | null {
     return FlightRecorderImpl.activeInstance;
+  }
+
+  public hideWidget(): void {
+    if (this.widget) {
+      this.widget.hide();
+    } else {
+      FlightRecorderImpl.hideWidget();
+    }
+  }
+
+  public showWidget(): void {
+    if (this.widget) {
+      this.widget.show();
+    } else {
+      FlightRecorderImpl.showWidget();
+    }
+  }
+
+  public toggleWidget(): boolean {
+    if (this.widget) {
+      return this.widget.toggle();
+    }
+    return FlightRecorderImpl.toggleWidget();
   }
 
   private nextSequence = (): number => {
@@ -300,7 +396,11 @@ export class FlightRecorderImpl implements FlightRecorder {
     this.stateMachine.transition({ type: 'STOP' });
   }
 
-  public async capture(reason: string = 'manual', windowSeconds?: number): Promise<string> {
+  public async capture(
+    reason: string = 'manual',
+    windowSeconds?: number,
+    options?: CaptureOptions
+  ): Promise<string> {
     if (!this.incidentManager || !this.writer) {
       throw new Error('FlightRecorder não está em execução.');
     }
@@ -326,7 +426,13 @@ export class FlightRecorderImpl implements FlightRecorder {
         timestamp: now,
         type: 'manual',
         signature: `manual_capture_${reason}`,
-        detail: { userReason: reason, windowSeconds }
+        detail: {
+          userReason: reason,
+          windowSeconds,
+          annotationImage: options?.annotationImage,
+          notes: options?.notes,
+          annotations: options?.annotations
+        }
       },
       windowSeconds
     );

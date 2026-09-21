@@ -240,6 +240,15 @@ describe('Lote 3 — Viewer do Flight Recorder', () => {
     expect(screen.getByRole('button', { name: 'Voltar 5 segundos' })).toBeDefined();
     expect(screen.getByRole('button', { name: 'Avançar 5 segundos' })).toBeDefined();
 
+    // Botões de navegação frame a frame e pulo para erro
+    expect(screen.getByRole('button', { name: 'Voltar 1 frame' })).toBeDefined();
+    expect(screen.getByRole('button', { name: 'Avançar 1 frame' })).toBeDefined();
+    expect(screen.getByRole('button', { name: 'Pular para o momento do erro' })).toBeDefined();
+
+    // Botão de alternar anotação de tela foi removido dos controles
+    expect(screen.queryByText(/Anotações ON/i)).toBeNull();
+    expect(screen.queryByText(/Anotações OFF/i)).toBeNull();
+
     // Controle de Zoom
     const zoomSelect = screen.getByRole('combobox', { name: 'Controle de Zoom' });
     expect(zoomSelect).toBeDefined();
@@ -251,6 +260,14 @@ describe('Lote 3 — Viewer do Flight Recorder', () => {
     // Clica em avançar 1 segundo
     const forward1sBtn = screen.getByRole('button', { name: 'Avançar 1 segundo' });
     fireEvent.click(forward1sBtn);
+
+    // Clica em avançar 1 frame
+    const forwardFrameBtn = screen.getByRole('button', { name: 'Avançar 1 frame' });
+    fireEvent.click(forwardFrameBtn);
+
+    // Clica em pular para o momento do erro
+    const jumpErrorBtn = screen.getByRole('button', { name: 'Pular para o momento do erro' });
+    fireEvent.click(jumpErrorBtn);
   });
 
   it('abas responsivas alternam o painel selecionado sem descarregar o incidente nem perder a timeline', async () => {
@@ -303,6 +320,55 @@ describe('Lote 3 — Viewer do Flight Recorder', () => {
     expect(replayPanel.classList.contains('mobile-hidden')).toBe(false);
     expect(timelinePanel.classList.contains('mobile-hidden')).toBe(true);
     expect(screen.getByText(validArtifact.incident.id)).toBeDefined();
+  });
+
+  it('carrega artefato automaticamente a partir do parâmetro ?gist=<id>', async () => {
+    history.pushState(null, '', '?gist=gist_test_456');
+
+    const mockGistResponse = {
+      files: {
+        'incident.ffr.json': {
+          content: JSON.stringify(validArtifact)
+        }
+      }
+    };
+
+    fetchSpy.mockResolvedValueOnce({
+      ok: true,
+      json: async () => mockGistResponse
+    } as Response);
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText(validArtifact.incident.id)).toBeDefined();
+    });
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'https://api.github.com/gists/gist_test_456',
+      expect.objectContaining({ headers: { Accept: 'application/vnd.github+json' } })
+    );
+
+    history.pushState(null, '', '/');
+  });
+
+  it('carrega artefato automaticamente a partir do parâmetro ?url=<url>', async () => {
+    history.pushState(null, '', '?url=https%3A%2F%2Fstorage.example.com%2Fincident.ffr.json');
+
+    fetchSpy.mockResolvedValueOnce({
+      ok: true,
+      json: async () => validArtifact
+    } as Response);
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText(validArtifact.incident.id)).toBeDefined();
+    });
+
+    expect(fetchSpy).toHaveBeenCalledWith('https://storage.example.com/incident.ffr.json');
+
+    history.pushState(null, '', '/');
   });
 });
 

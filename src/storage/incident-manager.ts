@@ -398,7 +398,13 @@ export class IncidentManager {
         triggers: incident.triggers,
         startedAt: incident.startedAt,
         triggeredAt: incident.triggeredAt,
-        finalizedAt: incident.finalizedAt ?? incident.finalizeAt
+        finalizedAt: incident.finalizedAt ?? incident.finalizeAt,
+        annotationImage:
+          (incident.triggers?.find((t) => t.detail?.annotationImage)?.detail
+            ?.annotationImage as string) || undefined,
+        annotations:
+          (incident.triggers?.find((t) => t.detail?.annotations)?.detail
+            ?.annotations as Record<string, unknown>) || undefined
       },
       environment: this.environment,
       timeline: filteredTimeline,

@@ -4,6 +4,7 @@ import { FlightRecorderDB } from '../../src/storage/db';
 import { FlightRecorderImpl } from '../../src/core/flight-recorder';
 import { matchesSensitiveRoute, globToRegex } from '../../src/capturers/route-matcher';
 import { BacktrackWidget } from '../../src/widget/widget';
+import type { FlightRecorderArtifactV1 } from '../../src/types/artifact';
 
 describe('Backtrack v0.1.2 — Widget Nativo e Privacidade por Rota', () => {
   let idb: IDBFactory;
@@ -225,6 +226,134 @@ describe('Backtrack v0.1.2 — Widget Nativo e Privacidade por Rota', () => {
       recorder.stop();
       expect(document.getElementById('__backtrack_widget_host__')).toBeNull();
       expect(FlightRecorderImpl.getInstance()).toBeNull();
+    });
+
+    it('permite ocultar, exibir e alternar visibilidade do widget via métodos, atalho e persistência', async () => {
+      const recorder = new FlightRecorderImpl({}, db);
+      await recorder.start();
+      const widget = new BacktrackWidget(recorder);
+      widget.mount();
+
+      const host = document.getElementById('__backtrack_widget_host__');
+      expect(host).not.toBeNull();
+      expect(host?.style.display).not.toBe('none');
+      expect(widget.isVisible()).toBe(true);
+
+      // Oculta widget
+      widget.hide();
+      expect(host?.style.display).toBe('none');
+      expect(widget.isVisible()).toBe(false);
+      expect(localStorage.getItem('backtrack_widget_hidden')).toBe('true');
+
+      // Reexibe widget
+      widget.show();
+      expect(host?.style.display).toBe('');
+      expect(widget.isVisible()).toBe(true);
+      expect(localStorage.getItem('backtrack_widget_hidden')).toBeNull();
+
+      // Alterna visibilidade
+      const isVisibleNow = widget.toggle();
+      expect(isVisibleNow).toBe(false);
+      expect(host?.style.display).toBe('none');
+
+      const isVisibleAfterToggle = widget.toggle();
+      expect(isVisibleAfterToggle).toBe(true);
+      expect(host?.style.display).toBe('');
+
+      // Testa botão de ocultar no header do painel
+      const launcher = host?.shadowRoot?.getElementById('btn-launcher');
+      launcher?.click();
+
+      const btnHide = host?.shadowRoot?.getElementById('btn-hide-widget');
+      expect(btnHide).not.toBeNull();
+      btnHide?.click();
+      expect(host?.style.display).toBe('none');
+
+      // Testa atalho de teclado global Ctrl+Shift+B
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'B', ctrlKey: true, shiftKey: true }));
+      expect(host?.style.display).toBe('');
+
+      widget.unmount();
+      recorder.stop();
+      localStorage.removeItem('backtrack_widget_hidden');
+    });
+
+    it('ao clicar em Visualizar, carrega o artefato com getArtifact sem acionar exportIncident (sem download)', async () => {
+      const recorder = new FlightRecorderImpl({}, db);
+      await recorder.start();
+
+      const mockArtifact = {
+        schemaVersion: '1.0.0' as const,
+        incident: {
+          id: 'test-inc-1',
+          sessionId: 's1',
+          startedAt: 1000,
+          finalizedAt: 2000,
+          triggeredAt: 1500,
+          reason: 'Test bug',
+          environment: { url: 'http://localhost', userAgent: 'test', viewport: { width: 1000, height: 800 } }
+        },
+        timeline: [],
+        rrwebEvents: []
+      } as unknown as FlightRecorderArtifactV1;
+
+      const getArtifactSpy = vi.spyOn(recorder, 'getArtifact').mockResolvedValue(mockArtifact);
+      const exportIncidentSpy = vi.spyOn(recorder, 'exportIncident');
+
+      const widget = new BacktrackWidget(recorder);
+      widget.mount();
+
+      // Injeta incidente mock
+      (widget as unknown as { incidents: Array<{ id: string; startedAt: number; finalizedAt: number; reason: string }> }).incidents = [
+        { id: 'test-inc-1', startedAt: 1000, finalizedAt: 2000, reason: 'Test bug' }
+      ];
+
+      // Abre drawer
+      const host = document.getElementById('__backtrack_widget_host__');
+      host?.shadowRoot?.getElementById('btn-launcher')?.click();
+
+      const viewBtn = host?.shadowRoot?.querySelector('[data-view-id="test-inc-1"]') as HTMLButtonElement;
+      expect(viewBtn).not.toBeNull();
+
+      // Clica em Visualizar
+      viewBtn?.click();
+
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(getArtifactSpy).toHaveBeenCalledWith('test-inc-1');
+      expect(exportIncidentSpy).not.toHaveBeenCalled();
+
+      widget.unmount();
+      recorder.stop();
+    });
+
+    it('fecha o modal aberto ao pressionar a tecla Escape e exibe tooltip explicativo de 50mb no storage', async () => {
+      const recorder = new FlightRecorderImpl({}, db);
+      await recorder.start();
+      const widget = new BacktrackWidget(recorder);
+      widget.mount();
+
+      const host = document.getElementById('__backtrack_widget_host__');
+      expect(host).not.toBeNull();
+
+      // Abre o modal
+      host?.shadowRoot?.getElementById('btn-launcher')?.click();
+      expect(host?.shadowRoot?.querySelector('.backtrack-panel')).not.toBeNull();
+
+      // Tooltip explicativo de 50mb ao lado do tamanho
+      const storageTooltip = host?.shadowRoot?.querySelector('.backtrack-storage-tooltip-trigger');
+      expect(storageTooltip).not.toBeNull();
+      expect(storageTooltip?.getAttribute('title')).toContain('50 MB');
+      expect(storageTooltip?.getAttribute('title')).toContain('IndexedDB');
+
+      // Pressiona Escape
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+
+      // Modal deve estar fechado
+      expect(host?.shadowRoot?.querySelector('.backtrack-panel')).toBeNull();
+
+      widget.unmount();
+      recorder.stop();
     });
   });
 });

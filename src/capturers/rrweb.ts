@@ -38,7 +38,14 @@ export class RrwebCapturer {
         privacy.blockSelector,
         '.backtrack-block',
         '.ffr-block',
-        '[data-backtrack-block]'
+        '[data-backtrack-block]',
+        '#__backtrack_annotator_overlay__',
+        '#__backtrack_widget_host__',
+        '.backtrack-ignore',
+        '.rr-ignore',
+        '.rr-block',
+        '[data-rr-ignore]',
+        '[data-backtrack-ignore]'
       ]
         .filter(Boolean)
         .join(', ');

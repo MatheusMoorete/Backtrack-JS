@@ -706,6 +706,45 @@ body {
   outline: 2px solid var(--blue-focus);
 }
 
+.btn-step-frame {
+  font-weight: 600;
+  color: #38bdf8;
+  padding: 0 7px;
+}
+
+.btn-step-frame:hover {
+  background-color: rgba(56, 189, 248, 0.15);
+  color: #7dd3fc;
+}
+
+.btn-jump-error {
+  height: 26px;
+  padding: 0 9px;
+  border-radius: var(--radius-sm);
+  background-color: rgba(239, 68, 68, 0.14);
+  color: #fca5a5;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid rgba(239, 68, 68, 0.45);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: all 0.12s ease;
+  outline: none;
+}
+
+.btn-jump-error:hover {
+  background-color: #ef4444;
+  color: #ffffff;
+  border-color: #ef4444;
+}
+
+.btn-jump-error:focus-visible {
+  outline: 2px solid var(--red-border);
+}
+
 .step-divider {
   width: 1px;
   height: 12px;

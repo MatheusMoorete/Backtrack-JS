@@ -8,9 +8,12 @@ interface ReplayPlayerProps {
   events: RrwebEvent[];
   startedAt: number;
   finalizedAt: number;
+  triggeredAt?: number;
   currentTimeMs: number;
   onSeek: (timeMs: number) => void;
   timelineEvents?: TimelineEvent[];
+  annotationImage?: string;
+  notes?: string;
 }
 
 type ZoomMode = 'auto' | '1.0' | '0.75' | '0.5' | '0.33';
@@ -31,13 +34,17 @@ export const ReplayPlayer: React.FC<ReplayPlayerProps> = ({
   events,
   startedAt,
   finalizedAt,
+  triggeredAt,
   currentTimeMs,
   onSeek,
-  timelineEvents
+  timelineEvents,
+  annotationImage,
+  notes
 }) => {
   const outerContainerRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const replayerRef = useRef<Replayer | null>(null);
+  const lastAppliedOffsetRef = useRef<number | null>(null);
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [speed, setSpeed] = useState<number>(1);
@@ -48,6 +55,19 @@ export const ReplayPlayer: React.FC<ReplayPlayerProps> = ({
 
   const totalDurationMs = Math.max(1000, finalizedAt - startedAt);
   const viewport = getViewportDimensions(events);
+
+  // Lista ordenada de timestamps de eventos únicos para avanço/recuo de 1 em 1 frame
+  const sortedEventOffsets = React.useMemo(() => {
+    if (!events || events.length === 0) return [];
+    const set = new Set<number>();
+    for (const ev of events) {
+      const offset = ev.timestamp - startedAt;
+      if (offset >= 0 && offset <= totalDurationMs) {
+        set.add(offset);
+      }
+    }
+    return Array.from(set).sort((a, b) => a - b);
+  }, [events, startedAt, totalDurationMs]);
 
   // Monitora o tamanho real do contêiner para calcular o auto-scale
   useEffect(() => {
@@ -157,6 +177,10 @@ export const ReplayPlayer: React.FC<ReplayPlayerProps> = ({
     if (!replayerRef.current) return;
     const offsetMs = Math.max(0, Math.min(totalDurationMs, currentTimeMs - startedAt));
     if (!isPlaying) {
+      if (lastAppliedOffsetRef.current === offsetMs) {
+        return;
+      }
+      lastAppliedOffsetRef.current = offsetMs;
       try {
         replayerRef.current.pause(offsetMs);
       } catch {
@@ -173,6 +197,7 @@ export const ReplayPlayer: React.FC<ReplayPlayerProps> = ({
     const interval = setInterval(() => {
       if (!replayerRef.current) return;
       const currentReplayTime = replayerRef.current.getCurrentTime();
+      lastAppliedOffsetRef.current = currentReplayTime;
       setTickerOffsetMs(currentReplayTime);
       onSeek(startedAt + currentReplayTime);
 
@@ -185,10 +210,11 @@ export const ReplayPlayer: React.FC<ReplayPlayerProps> = ({
     return () => clearInterval(interval);
   }, [isPlaying, onSeek, startedAt, totalDurationMs]);
 
-  // Seek direto
+  // Seek direto com reconstrução imediata do frame de vídeo
   const seekTo = useCallback(
     (offsetMs: number) => {
       const clamped = Math.max(0, Math.min(totalDurationMs, offsetMs));
+      lastAppliedOffsetRef.current = clamped;
       setTickerOffsetMs(clamped);
       onSeek(startedAt + clamped);
 
@@ -197,6 +223,7 @@ export const ReplayPlayer: React.FC<ReplayPlayerProps> = ({
           if (isPlaying) {
             replayerRef.current.play(clamped);
           } else {
+            // Em estado pausado, força o rrweb a reconstruir o DOM e exibir o frame imediatamente
             replayerRef.current.pause(clamped);
           }
         } catch {
@@ -207,7 +234,7 @@ export const ReplayPlayer: React.FC<ReplayPlayerProps> = ({
     [isPlaying, onSeek, startedAt, totalDurationMs]
   );
 
-  const togglePlay = () => {
+  const togglePlay = useCallback(() => {
     if (!replayerRef.current) return;
     if (isPlaying) {
       replayerRef.current.pause();
@@ -220,7 +247,41 @@ export const ReplayPlayer: React.FC<ReplayPlayerProps> = ({
       replayerRef.current.play(currentOffset >= totalDurationMs ? 0 : currentOffset);
       setIsPlaying(true);
     }
-  };
+  }, [isPlaying, tickerOffsetMs, currentTimeMs, startedAt, totalDurationMs, seekTo]);
+
+  // Avança ou recua exatamente 1 frame (evento de mutação / interação gravado)
+  const handleStepFrame = useCallback(
+    (direction: -1 | 1) => {
+      const currentOffset = tickerOffsetMs ?? Math.max(0, currentTimeMs - startedAt);
+
+      if (isPlaying && replayerRef.current) {
+        replayerRef.current.pause();
+        setIsPlaying(false);
+      }
+
+      let targetOffset: number;
+      if (direction === 1) {
+        // Encontra o próximo timestamp de evento gravado após a posição atual
+        const next = sortedEventOffsets.find((t) => t > currentOffset + 15);
+        if (next !== undefined) {
+          targetOffset = next;
+        } else {
+          targetOffset = Math.min(totalDurationMs, currentOffset + 33);
+        }
+      } else {
+        // Encontra o último timestamp de evento gravado antes da posição atual
+        const prev = [...sortedEventOffsets].reverse().find((t) => t < currentOffset - 15);
+        if (prev !== undefined) {
+          targetOffset = prev;
+        } else {
+          targetOffset = Math.max(0, currentOffset - 33);
+        }
+      }
+
+      seekTo(targetOffset);
+    },
+    [tickerOffsetMs, currentTimeMs, startedAt, isPlaying, sortedEventOffsets, seekTo, totalDurationMs]
+  );
 
   const handleStepSeconds = (deltaSeconds: number) => {
     const currentOffset = tickerOffsetMs ?? Math.max(0, currentTimeMs - startedAt);
@@ -232,14 +293,68 @@ export const ReplayPlayer: React.FC<ReplayPlayerProps> = ({
     seekTo(newOffset);
   };
 
+  // Identifica o timestamp exato do momento do erro / gatilho
+  const errorEvent = React.useMemo(() => {
+    return timelineEvents?.find(
+      (e) =>
+        e.type === 'error' ||
+        (e.type === 'network' && (e.result === 'error' || (e.status !== undefined && (e.status >= 400 || e.status === 0)))) ||
+        (e.type === 'console' && e.level === 'error')
+    );
+  }, [timelineEvents]);
+
+  const errorOffsetMs = React.useMemo(() => {
+    if (triggeredAt && triggeredAt >= startedAt) {
+      return Math.min(totalDurationMs, Math.max(0, triggeredAt - startedAt));
+    }
+    if (errorEvent) {
+      return Math.min(totalDurationMs, Math.max(0, errorEvent.timestamp - startedAt));
+    }
+    return Math.min(totalDurationMs, Math.max(0, finalizedAt - startedAt));
+  }, [triggeredAt, startedAt, totalDurationMs, errorEvent, finalizedAt]);
+
+  const handleJumpToError = useCallback(() => {
+    if (isPlaying && replayerRef.current) {
+      replayerRef.current.pause();
+      setIsPlaying(false);
+    }
+    seekTo(errorOffsetMs);
+  }, [isPlaying, seekTo, errorOffsetMs]);
+
+  // Atalhos de teclado: Setas ou vírgula/ponto para passar frames, Espaço para play/pause
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+
+      if (e.key === 'ArrowRight' || e.key === '.') {
+        e.preventDefault();
+        handleStepFrame(1);
+      } else if (e.key === 'ArrowLeft' || e.key === ',') {
+        e.preventDefault();
+        handleStepFrame(-1);
+      } else if (e.key === ' ' || e.code === 'Space') {
+        e.preventDefault();
+        togglePlay();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleStepFrame, togglePlay]);
+
   const formatTime = (ms: number) => {
     const totalSec = Math.max(0, Math.floor(ms / 1000));
     const mins = Math.floor(totalSec / 60);
     const secs = totalSec % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    const millis = Math.floor((ms % 1000) / 10);
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${millis.toString().padStart(2, '0')}`;
   };
 
   const currentOffsetMs = tickerOffsetMs ?? Math.max(0, currentTimeMs - startedAt);
+  const triggerOffsetMs = Math.max(0, (triggeredAt || finalizedAt) - startedAt);
+  // Anotação é visível apenas na tela/momento exato do incidente (a partir de 1.5s antes do trigger até o final)
+  const isAtAnnotationTime = currentOffsetMs >= Math.max(0, triggerOffsetMs - 1500);
 
   return (
     <div className="replay-pane">
@@ -260,6 +375,32 @@ export const ReplayPlayer: React.FC<ReplayPlayerProps> = ({
               <div className="scale-pill">
                 <span>{Math.round(currentScale * 100)}%</span>
               </div>
+              {notes && isAtAnnotationTime && (
+                <div
+                  className="qa-note-pill"
+                  title="Anotação registrada pelo QA"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    padding: '3px 9px',
+                    borderRadius: '4px',
+                    background: 'rgba(15, 23, 42, 0.92)',
+                    border: '1px solid #3b82f6',
+                    color: '#f8fafc',
+                    fontSize: '11px',
+                    fontWeight: 500,
+                    maxWidth: '400px',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.5)'
+                  }}
+                >
+                  <span style={{ color: '#60a5fa', fontWeight: 700 }}>QA:</span>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{notes}</span>
+                </div>
+              )}
             </div>
 
             <div
@@ -272,6 +413,27 @@ export const ReplayPlayer: React.FC<ReplayPlayerProps> = ({
                 transformOrigin: 'top left'
               }}
             />
+
+            {/* Camada de Anotação Visual do QA (réguas, setas, desenhos) - exibida automaticamente no momento da anotação */}
+            {annotationImage && isAtAnnotationTime && (
+              <img
+                src={annotationImage}
+                alt="Anotações do QA sobre o Replay"
+                className="replay-annotation-overlay-layer"
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: `${viewport.width}px`,
+                  height: `${viewport.height}px`,
+                  transform: `scale(${currentScale})`,
+                  transformOrigin: 'top left',
+                  pointerEvents: 'none',
+                  zIndex: 25,
+                  objectFit: 'contain'
+                }}
+              />
+            )}
           </div>
         )}
       </div>
@@ -327,7 +489,7 @@ export const ReplayPlayer: React.FC<ReplayPlayerProps> = ({
             className="seek-slider-overlay"
             min={0}
             max={totalDurationMs}
-            step={1000}
+            step={10}
             value={currentOffsetMs}
             onChange={handleSliderChange}
             aria-label="Posição do replay"
@@ -342,7 +504,7 @@ export const ReplayPlayer: React.FC<ReplayPlayerProps> = ({
               className="btn-play-pause"
               onClick={togglePlay}
               aria-label={isPlaying ? 'Pausar replay' : 'Reproduzir replay'}
-              title={isPlaying ? 'Pausar' : 'Reproduzir'}
+              title={isPlaying ? 'Pausar (Espaço)' : 'Reproduzir (Espaço)'}
             >
               {isPlaying ? (
                 <>
@@ -362,7 +524,23 @@ export const ReplayPlayer: React.FC<ReplayPlayerProps> = ({
               )}
             </button>
 
-            {/* Pulos de tempo segundo a segundo */}
+            {/* Pular direto para o erro */}
+            <button
+              type="button"
+              className="btn-jump-error"
+              onClick={handleJumpToError}
+              aria-label="Pular para o momento do erro"
+              title={`Ir direto para o momento do erro (${formatTime(errorOffsetMs)})`}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+                <line x1="12" y1="9" x2="12" y2="13" />
+                <line x1="12" y1="17" x2="12.01" y2="17" />
+              </svg>
+              <span>Ir para o erro</span>
+            </button>
+
+            {/* Pulos de tempo e frames */}
             <div className="step-buttons-group">
               <button
                 type="button"
@@ -382,7 +560,25 @@ export const ReplayPlayer: React.FC<ReplayPlayerProps> = ({
               >
                 -1s
               </button>
+              <button
+                type="button"
+                className="btn-step btn-step-frame"
+                onClick={() => handleStepFrame(-1)}
+                aria-label="Voltar 1 frame"
+                title="Voltar 1 frame (atalho: Seta Esquerda ou vírgula)"
+              >
+                ◄ Frame
+              </button>
               <div className="step-divider" aria-hidden="true" />
+              <button
+                type="button"
+                className="btn-step btn-step-frame"
+                onClick={() => handleStepFrame(1)}
+                aria-label="Avançar 1 frame"
+                title="Avançar 1 frame (atalho: Seta Direita ou ponto)"
+              >
+                Frame ►
+              </button>
               <button
                 type="button"
                 className="btn-step"

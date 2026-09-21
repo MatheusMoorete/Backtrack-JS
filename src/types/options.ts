@@ -40,10 +40,16 @@ export interface FlightRecorderOptions {
   widgetOptions?: WidgetOptions;
 }
 
+export interface CaptureOptions {
+  annotationImage?: string;
+  notes?: string;
+  annotations?: Record<string, unknown>;
+}
+
 export interface FlightRecorder {
   start(): Promise<void>;
   stop(): void;
-  capture(reason?: string, windowSeconds?: number): Promise<string>;
+  capture(reason?: string, windowSeconds?: number, options?: CaptureOptions): Promise<string>;
   captureException(error: unknown, context?: ErrorContext): void;
   listIncidents(): Promise<IncidentSummary[]>;
   getArtifact(incidentId: string): Promise<FlightRecorderArtifactV1>;
@@ -51,4 +57,7 @@ export interface FlightRecorder {
   deleteIncident(incidentId: string): Promise<void>;
   clear(): Promise<void>;
   getHealth(): RecorderHealth;
+  hideWidget?(): void;
+  showWidget?(): void;
+  toggleWidget?(): boolean;
 }

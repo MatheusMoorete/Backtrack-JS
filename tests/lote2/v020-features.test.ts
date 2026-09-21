@@ -122,17 +122,70 @@ describe('Backtrack v0.2.0 — Novas Features', () => {
     });
   });
 
-  describe('ScreenAnnotator (Anotação de Tela)', () => {
-    it('cria overlay de anotação na tela com canvas e toolbar, e remove ao fechar', () => {
+  describe('ScreenAnnotator (Anotação de Tela & QA Ruler)', () => {
+    it('cria overlay de anotação na tela com canvas, toolbar e classes de bloqueio para rrweb', () => {
       const annotator = new ScreenAnnotator();
       const onDone = vi.fn();
 
       annotator.open(onDone);
       const overlay = document.getElementById('__backtrack_annotator_overlay__');
       expect(overlay).not.toBeNull();
+      expect(overlay?.className).toContain('backtrack-ignore');
+      expect(overlay?.className).toContain('rr-ignore');
+      expect(overlay?.getAttribute('data-rr-ignore')).toBe('true');
+
+      // Verifica presença de todas as ferramentas de QA
+      expect(overlay?.querySelector('#btn-tool-pen')).not.toBeNull();
+      expect(overlay?.querySelector('#btn-tool-arrow')).not.toBeNull();
+      expect(overlay?.querySelector('#btn-tool-rect')).not.toBeNull();
+      expect(overlay?.querySelector('#btn-tool-ruler')).not.toBeNull();
+      expect(overlay?.querySelector('#btn-tool-text')).not.toBeNull();
+
+      // Botões de ação
+      expect(overlay?.querySelector('#btn-undo')).not.toBeNull();
+      expect(overlay?.querySelector('#btn-clear')).not.toBeNull();
+      expect(overlay?.querySelector('#btn-done')).not.toBeNull();
+      expect(overlay?.querySelector('#btn-cancel')).not.toBeNull();
 
       annotator.close();
       expect(document.getElementById('__backtrack_annotator_overlay__')).toBeNull();
+    });
+
+    it('isola o widget host com classes rr-ignore para não poluir o replay', async () => {
+      const recorder = new FlightRecorderImpl({}, db);
+      await recorder.start();
+      const widget = new BacktrackWidget(recorder);
+      widget.mount();
+
+      const host = document.getElementById('__backtrack_widget_host__');
+      expect(host).not.toBeNull();
+      expect(host?.className).toContain('backtrack-ignore');
+      expect(host?.className).toContain('rr-ignore');
+      expect(host?.getAttribute('data-rr-ignore')).toBe('true');
+
+      recorder.stop();
+      widget.unmount();
+    });
+
+    it('persiste annotationImage e notes no artefato do incidente', async () => {
+      const recorder = new FlightRecorderImpl({}, db);
+      await recorder.start();
+
+      const fakeDataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+      const incidentId = await recorder.capture('Teste com anotação', 60, {
+        annotationImage: fakeDataUrl,
+        notes: 'mudar isso 3px para bottom'
+      });
+
+      const artifact = await recorder.getArtifact(incidentId);
+      expect(artifact.incident.annotationImage).toBe(fakeDataUrl);
+      expect(artifact.incident.triggers[0].detail?.notes).toBe('mudar isso 3px para bottom');
+
+      const md = formatIncidentMarkdown(artifact);
+      expect(md).toContain('Anotações do QA');
+      expect(md).toContain('mudar isso 3px para bottom');
+
+      recorder.stop();
     });
   });
 

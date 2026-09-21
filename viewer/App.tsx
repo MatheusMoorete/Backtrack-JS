@@ -10,6 +10,8 @@ export const App: React.FC = () => {
   const [artifact, setArtifact] = useState<FlightRecorderArtifactV1 | null>(null);
   const [currentTimeMs, setCurrentTimeMs] = useState<number>(0);
   const [mobilePane, setMobilePane] = useState<'replay' | 'timeline'>('replay');
+  const [remoteLoading, setRemoteLoading] = useState<boolean>(false);
+  const [remoteError, setRemoteError] = useState<string | null>(null);
 
   const handleArtifactLoaded = (loaded: FlightRecorderArtifactV1) => {
     setArtifact(loaded);
@@ -80,6 +82,76 @@ export const App: React.FC = () => {
     };
 
     window.addEventListener('message', handleMessage);
+
+    // 4. Carrega artefato remoto se houver ?gist= ou ?url= na barra de endereços
+    const loadRemote = async () => {
+      if (typeof window === 'undefined' || !window.location.search) return;
+      const params = new URLSearchParams(window.location.search);
+      const gistId = params.get('gist');
+      const directUrl = params.get('url');
+
+      if (!gistId && !directUrl) return;
+
+      setRemoteLoading(true);
+      setRemoteError(null);
+
+      try {
+        let rawData: unknown = null;
+
+        if (gistId) {
+          const res = await fetch(`https://api.github.com/gists/${encodeURIComponent(gistId)}`, {
+            headers: { Accept: 'application/vnd.github+json' }
+          });
+          if (!res.ok) {
+            throw new Error(`Falha ao obter Gist do GitHub (${res.status}): ${res.statusText}`);
+          }
+          const gistJson = await res.json();
+          const files = gistJson.files ? (Object.values(gistJson.files) as Array<{ content?: string; raw_url?: string; truncated?: boolean }>) : [];
+          if (files.length === 0) {
+            throw new Error('Nenhum arquivo encontrado no Gist especificado.');
+          }
+
+          const targetFile = files[0];
+          if (targetFile.truncated && targetFile.raw_url) {
+            const rawRes = await fetch(targetFile.raw_url);
+            rawData = await rawRes.json();
+          } else if (targetFile.content) {
+            rawData = JSON.parse(targetFile.content);
+          } else if (targetFile.raw_url) {
+            const rawRes = await fetch(targetFile.raw_url);
+            rawData = await rawRes.json();
+          } else {
+            throw new Error('Conteúdo do arquivo não disponível no Gist.');
+          }
+        } else if (directUrl) {
+          const res = await fetch(directUrl);
+          if (!res.ok) {
+            throw new Error(`Falha ao baixar artefato da URL (${res.status}): ${res.statusText}`);
+          }
+          rawData = await res.json();
+        }
+
+        const validation = validateFlightRecorderArtifact(rawData);
+        if (!validation.success) {
+          throw new Error(`Artefato inválido: ${validation.errors.join(', ')}`);
+        }
+
+        handleArtifactLoaded(validation.data);
+        try {
+          sessionStorage.setItem('backtrack_active_artifact', JSON.stringify(validation.data));
+        } catch {
+          // Ignora quota
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setRemoteError(msg);
+      } finally {
+        setRemoteLoading(false);
+      }
+    };
+
+    loadRemote();
+
     return () => window.removeEventListener('message', handleMessage);
   }, []);
 
@@ -101,8 +173,20 @@ export const App: React.FC = () => {
 
   return (
     <div className="app-container">
-      {!artifact ? (
-        <FileImporter onArtifactLoaded={handleArtifactLoaded} />
+      {remoteLoading ? (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', gap: '16px', color: '#6366f1' }}>
+          <div style={{ width: '42px', height: '42px', border: '3px solid rgba(99, 102, 241, 0.2)', borderTopColor: '#6366f1', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+          <p style={{ fontSize: '15px', fontWeight: 500 }}>Carregando replay compartilhado...</p>
+        </div>
+      ) : !artifact ? (
+        <>
+          {remoteError && (
+            <div style={{ maxWidth: '640px', margin: '24px auto 0', padding: '12px 18px', background: '#fee2e2', border: '1px solid #ef4444', borderRadius: '8px', color: '#991b1b', fontSize: '14px' }}>
+              <strong>Erro ao carregar link compartilhado:</strong> {remoteError}
+            </div>
+          )}
+          <FileImporter onArtifactLoaded={handleArtifactLoaded} />
+        </>
       ) : (
         <>
           <IncidentHeader artifact={artifact} onReset={handleReset} />
@@ -148,9 +232,16 @@ export const App: React.FC = () => {
                 events={artifact.replay}
                 startedAt={artifact.incident.startedAt}
                 finalizedAt={artifact.incident.finalizedAt}
+                triggeredAt={artifact.incident.triggeredAt}
                 currentTimeMs={currentTimeMs}
                 onSeek={handleSeek}
                 timelineEvents={artifact.timeline}
+                annotationImage={artifact.incident.annotationImage}
+                notes={
+                  (artifact.incident.annotations?.notes as string) ||
+                  (artifact.incident.triggers?.find((t) => t.detail?.notes)?.detail?.notes as string) ||
+                  (artifact.incident.triggers?.find((t) => (t.detail?.userReason as string)?.startsWith('Anotação'))?.detail?.userReason as string)
+                }
               />
             </div>
 
