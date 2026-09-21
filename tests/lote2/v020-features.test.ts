@@ -119,6 +119,12 @@ describe('Backtrack v0.2.0 — Novas Features', () => {
       expect(md).toContain('TypeError: Cannot read properties of undefined');
       expect(md).toContain('POST https://uticket.com.br/api/payment');
       expect(md).toContain('Status: 500');
+      expect(md).not.toContain('Replay do Incidente');
+
+      const mdWithReplay = formatIncidentMarkdown(mockArtifact, {
+        replayUrl: 'http://localhost:5173/?gist=abc123gist'
+      });
+      expect(mdWithReplay).toContain('- **Replay do Incidente:** [Assistir Gravação](http://localhost:5173/?gist=abc123gist)');
     });
   });
 

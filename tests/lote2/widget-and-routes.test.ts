@@ -133,6 +133,15 @@ describe('Backtrack v0.1.2 — Widget Nativo e Privacidade por Rota', () => {
       expect(copyBtn?.textContent).toContain('Copiar Markdown');
       expect(deleteBtn?.textContent).toContain('Excluir');
 
+      // Clica em Copiar Markdown para abrir modal de opções
+      (copyBtn as HTMLButtonElement)?.click();
+      const modal = host?.shadowRoot?.querySelector('.backtrack-modal-card');
+      expect(modal).not.toBeNull();
+      expect(modal?.textContent).toContain('Adicionar link do incidente?');
+      const cancelBtn = host?.shadowRoot?.getElementById('btn-cancel-export-modal');
+      (cancelBtn as HTMLButtonElement)?.click();
+      expect(host?.shadowRoot?.querySelector('.backtrack-modal-card')).toBeNull();
+
       widget.unmount();
       recorder.stop();
     });

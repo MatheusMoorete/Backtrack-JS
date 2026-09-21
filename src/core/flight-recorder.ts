@@ -23,6 +23,7 @@ import type {
 import type { RecorderHealth } from '../types/health';
 import type { IncidentSummary } from '../types/incident';
 import type { EnvironmentMetadata, FlightRecorderArtifactV1 } from '../types/artifact';
+import { compressArtifact } from '../utils/compression';
 
 export class FlightRecorderImpl implements FlightRecorder {
   private static activeInstance: FlightRecorderImpl | null = null;
@@ -469,18 +470,29 @@ export class FlightRecorderImpl implements FlightRecorder {
     return this.incidentManager.exportArtifact(incidentId);
   }
 
-  public async exportIncident(incidentId: string): Promise<FlightRecorderArtifactV1> {
+  public async exportIncident(
+    incidentId: string,
+    options?: { compress?: boolean }
+  ): Promise<FlightRecorderArtifactV1> {
     const artifact = await this.getArtifact(incidentId);
-    const jsonStr = JSON.stringify(artifact, null, 2);
 
     const dateStr = new Date(artifact.incident.triggeredAt)
       .toISOString()
       .replace(/:/g, '-')
       .replace(/\..+/, '');
-    const filename = `flight-recorder-${dateStr}-${artifact.incident.reason}-${incidentId}.ffr.json`;
+    const isCompressed = options?.compress ?? false;
+    const ext = isCompressed ? '.ffr.json.gz' : '.ffr.json';
+    const filename = `flight-recorder-${dateStr}-${artifact.incident.reason}-${incidentId}${ext}`;
 
     if (typeof window !== 'undefined' && typeof document !== 'undefined') {
-      const blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8' });
+      let blob: Blob;
+      if (isCompressed) {
+        const compressed = await compressArtifact(artifact);
+        blob = new Blob([compressed as unknown as BlobPart], { type: 'application/gzip' });
+      } else {
+        const jsonStr = JSON.stringify(artifact, null, 2);
+        blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8' });
+      }
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;

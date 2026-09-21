@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
-import { validateFlightRecorderArtifact } from '../../src/validation/validate';
 import type { FlightRecorderArtifactV1 } from '../../src/types/artifact';
+import { validateFlightRecorderArtifact } from '../../src/validation/validate';
+import { decompressGzip } from '../../src/utils/compression';
 
 interface FileImporterProps {
   onArtifactLoaded: (artifact: FlightRecorderArtifactV1) => void;
@@ -26,7 +27,15 @@ export const FileImporter: React.FC<FileImporterProps> = ({
     }
 
     try {
-      const text = await file.text();
+      const buffer = await file.arrayBuffer();
+      let text: string;
+      try {
+        text = await decompressGzip(new Uint8Array(buffer));
+      } catch (err) {
+        setErrorMessages([`Falha ao descompactar arquivo: ${err instanceof Error ? err.message : String(err)}`]);
+        return;
+      }
+
       let parsed: unknown;
       try {
         parsed = JSON.parse(text);
@@ -44,7 +53,7 @@ export const FileImporter: React.FC<FileImporterProps> = ({
       try {
         sessionStorage.setItem('ffr_active_artifact', JSON.stringify(validation.data));
       } catch {
-        // Ignora
+        // Ignora erro de quota
       }
 
       onArtifactLoaded(validation.data);
@@ -123,7 +132,7 @@ export const FileImporter: React.FC<FileImporterProps> = ({
         <input
           ref={fileInputRef}
           type="file"
-          accept=".json,.ffr.json"
+          accept=".json,.ffr.json,.gz,.ffr.json.gz,application/json,application/gzip"
           style={{ display: 'none' }}
           onChange={handleFileInputChange}
         />

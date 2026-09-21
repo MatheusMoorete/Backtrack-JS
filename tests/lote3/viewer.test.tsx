@@ -6,6 +6,7 @@ import { resolve } from 'path';
 import { App } from '../../viewer/App';
 import { FileImporter } from '../../viewer/components/FileImporter';
 import { TimelineView } from '../../viewer/components/TimelineView';
+import { IncidentHeader } from '../../viewer/components/IncidentHeader';
 import type { FlightRecorderArtifactV1 } from '../../src/types/artifact';
 
 describe('Lote 3 — Viewer do Flight Recorder', () => {
@@ -369,6 +370,32 @@ describe('Lote 3 — Viewer do Flight Recorder', () => {
     expect(fetchSpy).toHaveBeenCalledWith('https://storage.example.com/incident.ffr.json');
 
     history.pushState(null, '', '/');
+  });
+
+  it('exibe título Backtrack JS com versão, remove badge manual e abre modal Compartilhar', async () => {
+    const onReset = vi.fn();
+    render(<IncidentHeader artifact={validArtifact} onReset={onReset} />);
+
+    expect(screen.getByText('Backtrack JS')).toBeDefined();
+
+    // Badge com 'manual' deve ter sido removido
+    expect(document.querySelector('.incident-status-badge')).toBeNull();
+
+    // Botão Compartilhar deve estar visível
+    const shareBtn = screen.getByRole('button', { name: /compartilhar/i });
+    expect(shareBtn).toBeDefined();
+
+    // Abre modal de compartilhamento
+    fireEvent.click(shareBtn);
+
+    expect(screen.getByText('Compartilhar Incidente')).toBeDefined();
+    expect(screen.getByText('Compartilhar via Link')).toBeDefined();
+    expect(screen.getByText('Baixar Arquivo da Gravação')).toBeDefined();
+
+    // Pressiona tecla Escape para fechar modal
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    expect(screen.queryByText('Compartilhar Incidente')).toBeNull();
   });
 });
 

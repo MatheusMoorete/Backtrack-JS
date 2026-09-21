@@ -633,4 +633,157 @@ export const WIDGET_CSS = `
   border: 1px dashed #334155;
   border-radius: 4px;
 }
+
+/* Modal de Confirmação e Opções de Exportação */
+.backtrack-modal-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  border-radius: 8px;
+  padding: 16px;
+  backdrop-filter: blur(2px);
+}
+
+.backtrack-modal-card {
+  width: 100%;
+  max-width: 320px;
+  background-color: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.backtrack-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid #1e293b;
+  background-color: #0b0f17;
+}
+
+.backtrack-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #f8fafc;
+}
+
+.backtrack-modal-close {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 4px;
+  line-height: 1;
+}
+
+.backtrack-modal-close:hover {
+  color: #f1f5f9;
+}
+
+.backtrack-modal-body {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.backtrack-modal-checkbox-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.backtrack-modal-checkbox-label input[type="checkbox"] {
+  margin-top: 2px;
+  width: 15px;
+  height: 15px;
+  accent-color: #2563eb;
+  cursor: pointer;
+}
+
+.backtrack-modal-checkbox-title {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #f1f5f9;
+}
+
+.backtrack-modal-checkbox-desc {
+  margin: 2px 0 0 0;
+  font-size: 11px;
+  color: #94a3b8;
+  line-height: 1.35;
+}
+
+.backtrack-modal-error {
+  padding: 6px 8px;
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 4px;
+  color: #fca5a5;
+  font-size: 11px;
+}
+
+.backtrack-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 8px 14px;
+  border-top: 1px solid #1e293b;
+  background-color: #0b0f17;
+}
+
+.backtrack-btn-secondary {
+  background-color: #1e293b;
+  border: 1px solid #334155;
+  color: #cbd5e1;
+  border-radius: 4px;
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.backtrack-btn-secondary:hover:not(:disabled) {
+  background-color: #334155;
+  color: #f8fafc;
+}
+
+.backtrack-btn-primary {
+  background-color: #2563eb;
+  border: 1px solid #3b82f6;
+  color: #ffffff;
+  border-radius: 4px;
+  padding: 5px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.backtrack-btn-primary:hover:not(:disabled) {
+  background-color: #1d4ed8;
+}
+
+.backtrack-btn-primary:disabled,
+.backtrack-btn-secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 `;

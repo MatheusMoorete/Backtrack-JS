@@ -8,6 +8,7 @@ import type {
 import type { RrwebEvent } from '../types/chunk';
 import type { FlightRecorderArtifactV1, EnvironmentMetadata } from '../types/artifact';
 import { sortTimelineEvents } from '../validation/validate';
+import { decompressGzip } from '../utils/compression';
 
 export interface IncidentManagerConfig {
   afterErrorSeconds: number; // default 15
@@ -254,7 +255,7 @@ export class IncidentManager {
       if (candidateChunks.length > 0) {
         // Verifica se os candidatos possuem FullSnapshot do rrweb (type: 2)
         const hasFullSnapshot = candidateChunks.some((c) =>
-          c.replay?.some((r) => r.type === 2)
+          c.hasFullSnapshot ?? c.replay?.some((r) => r.type === 2)
         );
 
         if (!hasFullSnapshot) {
@@ -264,7 +265,7 @@ export class IncidentManager {
             .find(
               (c) =>
                 c.startedAt < candidateChunks[0].startedAt &&
-                c.replay?.some((r) => r.type === 2)
+                (c.hasFullSnapshot ?? c.replay?.some((r) => r.type === 2))
             );
 
           if (priorChunkWithSnapshot) {
@@ -275,13 +276,13 @@ export class IncidentManager {
       } else if (chunks.length > 0) {
         // Fallback se nenhum chunk intersecta a janela (ex: usuário inativo)
         const lastChunk = chunks[chunks.length - 1];
-        const hasSnapshot = lastChunk.replay?.some((r) => r.type === 2);
+        const hasSnapshot = lastChunk.hasFullSnapshot ?? lastChunk.replay?.some((r) => r.type === 2);
         if (hasSnapshot) {
           selectedChunks = [lastChunk];
         } else {
           const priorChunkWithSnapshot = [...chunks]
             .reverse()
-            .find((c) => c.replay?.some((r) => r.type === 2));
+            .find((c) => c.hasFullSnapshot ?? c.replay?.some((r) => r.type === 2));
           selectedChunks =
             priorChunkWithSnapshot && priorChunkWithSnapshot.id !== lastChunk.id
               ? [priorChunkWithSnapshot, lastChunk]
@@ -380,7 +381,21 @@ export class IncidentManager {
     const filteredTimeline = sortedTimeline.filter(
       (e) => e.timestamp >= incident.startedAt && e.timestamp <= (incident.finalizedAt ?? incident.finalizeAt)
     );
-    const rawReplay = chunks.flatMap((c) => c.replay || []);
+    const rawReplay = (
+      await Promise.all(
+        chunks.map(async (c) => {
+          if (c.replayCompressed && c.replayCompressed.length > 0) {
+            try {
+              const text = await decompressGzip(c.replayCompressed);
+              return JSON.parse(text) as RrwebEvent[];
+            } catch {
+              return c.replay || [];
+            }
+          }
+          return c.replay || [];
+        })
+      )
+    ).flat();
     const slicedReplay = sliceReplayEventsForWindow(
       rawReplay,
       incident.startedAt,

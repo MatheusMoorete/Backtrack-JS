@@ -1,6 +1,7 @@
 import type { FlightRecorderDB } from './db';
 import type { StoredChunk, RrwebEvent } from '../types/chunk';
 import type { TimelineEvent } from '../types/timeline';
+import { compressGzip } from '../utils/compression';
 
 export interface BatchWriterConfig {
   flushIntervalMs: number; // default 1000ms
@@ -122,6 +123,7 @@ export class BatchWriter {
 
     const chunkCopy: StoredChunk = {
       ...this.currentChunk,
+      hasFullSnapshot: this.currentChunk.replay.some((r) => r.type === 2),
       timeline: [...this.currentChunk.timeline],
       replay: [...this.currentChunk.replay]
     };
@@ -130,6 +132,17 @@ export class BatchWriter {
 
     this.writeChain = this.writeChain
       .then(async () => {
+        if (chunkCopy.replay.length > 0) {
+          try {
+            const json = JSON.stringify(chunkCopy.replay);
+            const compressed = await compressGzip(json);
+            chunkCopy.replayCompressed = compressed;
+            chunkCopy.sizeBytes = compressed.byteLength + JSON.stringify(chunkCopy.timeline).length;
+            chunkCopy.replay = [];
+          } catch {
+            // Em caso de falha, mantém replay original
+          }
+        }
         await this.db.putChunk(chunkCopy);
         if (this.onChunkPersistedCallback) {
           this.onChunkPersistedCallback(chunkCopy);

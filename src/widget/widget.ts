@@ -25,6 +25,11 @@ export class BacktrackWidget {
   private openMenuId: string | null = null;
   private isCustomDuration = false;
 
+  private exportModalIncidentId: string | null = null;
+  private exportModalIncludeLink = true;
+  private isExportingMarkdown = false;
+  private exportModalError: string | null = null;
+
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private handleGlobalKey?: (e: KeyboardEvent) => void;
 
@@ -63,6 +68,11 @@ export class BacktrackWidget {
     // Atalho global para alternar visibilidade (Ctrl+Shift+B ou Cmd+Shift+B) e fechar com Escape
     this.handleGlobalKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape' || e.key === 'Esc') {
+        if (this.exportModalIncidentId) {
+          e.preventDefault();
+          this.closeExportModal();
+          return;
+        }
         if (this.openMenuId) {
           e.preventDefault();
           this.openMenuId = null;
@@ -272,24 +282,100 @@ export class BacktrackWidget {
     }
   }
 
-  private async handleCopyMarkdown(incidentId: string): Promise<void> {
+  private handleCopyMarkdown(incidentId: string): void {
+    this.openExportModal(incidentId);
+  }
+
+  private openExportModal(incidentId: string): void {
+    this.exportModalIncidentId = incidentId;
+    this.exportModalIncludeLink = true;
+    this.exportModalError = null;
+    this.isExportingMarkdown = false;
+    this.openMenuId = null;
+    this.render();
+  }
+
+  private closeExportModal(): void {
+    if (this.isExportingMarkdown) return;
+    this.exportModalIncidentId = null;
+    this.exportModalError = null;
+    this.render();
+  }
+
+  private async confirmCopyMarkdown(): Promise<void> {
+    const id = this.exportModalIncidentId;
+    if (!id) return;
+
+    this.isExportingMarkdown = true;
+    this.exportModalError = null;
+    this.render();
+
     try {
-      const artifact = await this.recorder.getArtifact(incidentId);
-      const md = formatIncidentMarkdown(artifact);
+      const artifact = await this.recorder.getArtifact(id);
+      let replayUrl: string | undefined;
+
+      if (this.exportModalIncludeLink) {
+        let token = typeof localStorage !== 'undefined' ? localStorage.getItem('backtrack_github_token') : null;
+
+        if (!token || !token.trim()) {
+          const prompted = prompt(
+            'Insira seu GitHub Personal Access Token (com permissão "gist") para gerar o link compartilhado:'
+          );
+          if (!prompted || !prompted.trim()) {
+            this.isExportingMarkdown = false;
+            this.render();
+            return;
+          }
+          token = prompted.trim();
+          try {
+            localStorage.setItem('backtrack_github_token', token);
+          } catch {
+            // Ignora
+          }
+        }
+
+        const result = await uploadArtifactToGist(artifact, token);
+        const viewerUrl = this.options.defaultViewerUrl || DEFAULT_VIEWER_URL;
+        replayUrl = `${viewerUrl}/?gist=${result.gistId}`;
+
+        const offsetSec = Math.floor(
+          Math.max(0, (artifact.incident.triggeredAt || artifact.incident.finalizedAt) - artifact.incident.startedAt) / 1000
+        );
+        if (replayUrl && offsetSec > 0 && !replayUrl.includes('&t=') && !replayUrl.includes('?t=')) {
+          replayUrl += (replayUrl.includes('?') ? '&' : '?') + `t=${offsetSec}`;
+        }
+      }
+
+      const md = formatIncidentMarkdown(artifact, { replayUrl });
       if (typeof navigator !== 'undefined' && navigator.clipboard) {
         await navigator.clipboard.writeText(md);
-        this.alertMessage = 'Resumo Markdown copiado para o Jira/GitHub!';
+        this.alertMessage = this.exportModalIncludeLink
+          ? 'Resumo Markdown copiado com link do replay!'
+          : 'Resumo Markdown copiado para o Jira/GitHub!';
       } else {
         this.alertMessage = 'Área de transferência indisponível.';
       }
+      this.closeExportModal();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes('401')) {
+        try {
+          localStorage.removeItem('backtrack_github_token');
+        } catch {
+          // Ignora
+        }
+      }
+      this.exportModalError = `Falha: ${msg}`;
+      this.isExportingMarkdown = false;
       this.render();
-      setTimeout(() => {
-        this.alertMessage = null;
-        this.render();
-      }, 3500);
-    } catch {
-      alert('Falha ao gerar resumo Markdown.');
+      return;
     }
+
+    this.render();
+    setTimeout(() => {
+      this.alertMessage = null;
+      this.render();
+    }, 3500);
   }
 
   private async handleShareGist(incidentId: string): Promise<void> {
@@ -654,6 +740,8 @@ export class BacktrackWidget {
                 ${this.renderIncidentsHtml()}
               </div>
             </div>
+
+            ${this.exportModalIncidentId ? this.renderExportModal() : ''}
           </div>
         `
             : ''
@@ -725,7 +813,7 @@ export class BacktrackWidget {
                     <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
                     <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
                   </svg>
-                  <span>Copiar Markdown</span>
+                  <span>Copiar Markdown (Jira / GitHub)</span>
                 </button>
                 <div class="backtrack-dropdown-divider"></div>
                 <button type="button" class="backtrack-dropdown-item is-danger" data-delete-id="${inc.id}">
@@ -742,6 +830,41 @@ export class BacktrackWidget {
       `;
       })
       .join('');
+  }
+
+  private renderExportModal(): string {
+    return `
+      <div class="backtrack-modal-overlay">
+        <div class="backtrack-modal-card">
+          <div class="backtrack-modal-header">
+            <div class="backtrack-modal-title">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </svg>
+              <span>Copiar para Jira / GitHub</span>
+            </div>
+            <button type="button" class="backtrack-modal-close" id="btn-close-export-modal" aria-label="Fechar">✕</button>
+          </div>
+          <div class="backtrack-modal-body">
+            <label class="backtrack-modal-checkbox-label">
+              <input type="checkbox" id="check-include-incident-link" ${this.exportModalIncludeLink ? 'checked' : ''} ${this.isExportingMarkdown ? 'disabled' : ''} />
+              <div>
+                <span class="backtrack-modal-checkbox-title">Adicionar link do incidente?</span>
+                <p class="backtrack-modal-checkbox-desc">Gera e inclui o link público do replay online (GitHub Gist) no resumo Markdown para que a equipe possa inspecionar a sessão diretamente pela issue.</p>
+              </div>
+            </label>
+            ${this.exportModalError ? `<div class="backtrack-modal-error">${this.exportModalError}</div>` : ''}
+          </div>
+          <div class="backtrack-modal-footer">
+            <button type="button" class="backtrack-btn-secondary" id="btn-cancel-export-modal" ${this.isExportingMarkdown ? 'disabled' : ''}>Cancelar</button>
+            <button type="button" class="backtrack-btn-primary" id="btn-confirm-export-modal" ${this.isExportingMarkdown ? 'disabled' : ''}>
+              ${this.isExportingMarkdown ? 'Criando link do Gist...' : 'Copiar Markdown'}
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
   }
 
   private updateDomValues(): void {
@@ -963,6 +1086,21 @@ export class BacktrackWidget {
       });
 
       this.attachIncidentListeners();
+
+      if (this.exportModalIncidentId) {
+        this.shadow.getElementById('btn-close-export-modal')?.addEventListener('click', () => {
+          this.closeExportModal();
+        });
+        this.shadow.getElementById('btn-cancel-export-modal')?.addEventListener('click', () => {
+          this.closeExportModal();
+        });
+        this.shadow.getElementById('check-include-incident-link')?.addEventListener('change', (e) => {
+          this.exportModalIncludeLink = (e.target as HTMLInputElement).checked;
+        });
+        this.shadow.getElementById('btn-confirm-export-modal')?.addEventListener('click', () => {
+          this.confirmCopyMarkdown();
+        });
+      }
 
       this.shadow.querySelector('.backtrack-panel')?.addEventListener('click', (e) => {
         if (this.openMenuId) {

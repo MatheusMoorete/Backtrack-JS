@@ -4,6 +4,7 @@ import { IncidentHeader } from './components/IncidentHeader';
 import { ReplayPlayer } from './components/ReplayPlayer';
 import { TimelineView } from './components/TimelineView';
 import { validateFlightRecorderArtifact } from '../src/validation/validate';
+import { decompressArtifact } from '../src/utils/compression';
 import type { FlightRecorderArtifactV1 } from '../src/types/artifact';
 
 export const App: React.FC = () => {
@@ -13,10 +14,27 @@ export const App: React.FC = () => {
   const [remoteLoading, setRemoteLoading] = useState<boolean>(false);
   const [remoteError, setRemoteError] = useState<string | null>(null);
 
-  const handleArtifactLoaded = (loaded: FlightRecorderArtifactV1) => {
+  const parseTimeOffsetParam = (t: string | null): number | undefined => {
+    if (!t) return undefined;
+    if (t.includes(':')) {
+      const parts = t.split(':').map(Number);
+      if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+        return (parts[0] * 60 + parts[1]) * 1000;
+      }
+    }
+    const clean = t.replace(/s$/i, '');
+    const num = parseFloat(clean);
+    if (isNaN(num)) return undefined;
+    if (t.toLowerCase().endsWith('ms')) return num;
+    return num * 1000;
+  };
+
+  const handleArtifactLoaded = (loaded: FlightRecorderArtifactV1, initialOffsetMs?: number) => {
     setArtifact(loaded);
-    // Inicia no timestamp inicial do incidente (00:00) para reprodução do contexto
-    setCurrentTimeMs(loaded.incident.startedAt);
+    const start = loaded.incident.startedAt;
+    const duration = Math.max(0, loaded.incident.finalizedAt - loaded.incident.startedAt);
+    const offset = initialOffsetMs !== undefined ? Math.min(Math.max(0, initialOffsetMs), duration) : 0;
+    setCurrentTimeMs(start + offset);
     setMobilePane('replay');
   };
 
@@ -38,7 +56,9 @@ export const App: React.FC = () => {
         const parsed = JSON.parse(saved);
         const validation = validateFlightRecorderArtifact(parsed);
         if (validation.success) {
-          handleArtifactLoaded(validation.data);
+          const params = typeof window !== 'undefined' && window.location.search ? new URLSearchParams(window.location.search) : null;
+          const initialOffsetMs = parseTimeOffsetParam(params?.get('t') ?? null);
+          handleArtifactLoaded(validation.data, initialOffsetMs);
         }
       }
     } catch {
@@ -89,6 +109,7 @@ export const App: React.FC = () => {
       const params = new URLSearchParams(window.location.search);
       const gistId = params.get('gist');
       const directUrl = params.get('url');
+      const initialOffsetMs = parseTimeOffsetParam(params.get('t'));
 
       if (!gistId && !directUrl) return;
 
@@ -96,8 +117,6 @@ export const App: React.FC = () => {
       setRemoteError(null);
 
       try {
-        let rawData: unknown = null;
-
         if (gistId) {
           const res = await fetch(`https://api.github.com/gists/${encodeURIComponent(gistId)}`, {
             headers: { Accept: 'application/vnd.github+json' }
@@ -112,35 +131,58 @@ export const App: React.FC = () => {
           }
 
           const targetFile = files[0];
+          let loadedArtifact: FlightRecorderArtifactV1;
+
+          const readResponseArtifact = async (response: Response): Promise<FlightRecorderArtifactV1> => {
+            if (typeof response.arrayBuffer === 'function') {
+              const buf = await response.arrayBuffer();
+              return decompressArtifact(buf);
+            }
+            if (typeof response.json === 'function') {
+              const json = await response.json();
+              return decompressArtifact(json);
+            }
+            const txt = await response.text();
+            return decompressArtifact(txt);
+          };
+
           if (targetFile.truncated && targetFile.raw_url) {
             const rawRes = await fetch(targetFile.raw_url);
-            rawData = await rawRes.json();
+            loadedArtifact = await readResponseArtifact(rawRes);
           } else if (targetFile.content) {
-            rawData = JSON.parse(targetFile.content);
+            loadedArtifact = await decompressArtifact(targetFile.content);
           } else if (targetFile.raw_url) {
             const rawRes = await fetch(targetFile.raw_url);
-            rawData = await rawRes.json();
+            loadedArtifact = await readResponseArtifact(rawRes);
           } else {
             throw new Error('Conteúdo do arquivo não disponível no Gist.');
           }
+
+          handleArtifactLoaded(loadedArtifact, initialOffsetMs);
+          try {
+            sessionStorage.setItem('backtrack_active_artifact', JSON.stringify(loadedArtifact));
+          } catch {
+            // Ignora quota
+          }
+          return;
         } else if (directUrl) {
           const res = await fetch(directUrl);
           if (!res.ok) {
             throw new Error(`Falha ao baixar artefato da URL (${res.status}): ${res.statusText}`);
           }
-          rawData = await res.json();
-        }
+          const loadedArtifact = typeof res.arrayBuffer === 'function'
+            ? await decompressArtifact(await res.arrayBuffer())
+            : typeof res.json === 'function'
+              ? await decompressArtifact(await res.json())
+              : await decompressArtifact(await res.text());
 
-        const validation = validateFlightRecorderArtifact(rawData);
-        if (!validation.success) {
-          throw new Error(`Artefato inválido: ${validation.errors.join(', ')}`);
-        }
-
-        handleArtifactLoaded(validation.data);
-        try {
-          sessionStorage.setItem('backtrack_active_artifact', JSON.stringify(validation.data));
-        } catch {
-          // Ignora quota
+          handleArtifactLoaded(loadedArtifact, initialOffsetMs);
+          try {
+            sessionStorage.setItem('backtrack_active_artifact', JSON.stringify(loadedArtifact));
+          } catch {
+            // Ignora quota
+          }
+          return;
         }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);

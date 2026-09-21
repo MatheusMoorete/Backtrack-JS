@@ -9,6 +9,7 @@ export * from './widget/annotator';
 export * from './capturers/route-matcher';
 export * from './utils/markdown';
 export * from './utils/gist-uploader';
+export * from './utils/compression';
 
 // Canonical Backtrack Exports and Aliases
 import { FlightRecorderImpl, createFlightRecorder } from './core/flight-recorder';
