@@ -3,6 +3,7 @@ import type { FlightRecorderArtifactV1 } from '../../src/types/artifact';
 import { formatIncidentMarkdown } from '../../src/utils/markdown';
 import { uploadArtifactToGist } from '../../src/utils/gist-uploader';
 import { compressArtifact } from '../../src/utils/compression';
+import packageJson from '../../package.json';
 
 interface IncidentHeaderProps {
   artifact: FlightRecorderArtifactV1;
@@ -255,7 +256,12 @@ export const IncidentHeader: React.FC<IncidentHeaderProps> = ({ artifact, onRese
             </svg>
           </span>
           <span className="brand-title">Backtrack JS</span>
-          <span className="brand-version-badge">v{recorderVersion || '0.3.1'}</span>
+          <span
+            className="brand-version-badge"
+            title={recorderVersion ? `Visualizador v${packageJson.version} (incidente gravado com v${recorderVersion})` : `Backtrack JS v${packageJson.version}`}
+          >
+            v{packageJson.version}
+          </span>
         </div>
 
         <div className="header-actions">
