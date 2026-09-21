@@ -663,7 +663,7 @@ export const ReplayPlayer: React.FC<ReplayPlayerProps> = ({
               aria-label="Pular para o momento do erro"
               title={
                 errorEvents.length > 0
-                  ? `Ir direto para o momento do erro (${errorEvents.length} erro${errorEvents.length > 1 ? 's' : ''})`
+                  ? `Ir direto para o momento do erro (${errorEvents.length} erro${errorEvents.length > 1 ? 's' : ''} detectado${errorEvents.length > 1 ? 's' : ''})`
                   : `Ir direto para o momento do erro (${formatTime(errorOffsetMs)})`
               }
             >
@@ -672,7 +672,11 @@ export const ReplayPlayer: React.FC<ReplayPlayerProps> = ({
                 <line x1="12" y1="9" x2="12" y2="13" />
                 <line x1="12" y1="17" x2="12.01" y2="17" />
               </svg>
-              <span>{errorEvents.length > 1 ? `Erros (${errorEvents.length})` : 'Ir para o erro'}</span>
+              <span>Erros</span>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <line x1="4" y1="12" x2="20" y2="12" />
+                <polyline points="14 6 20 12 14 18" />
+              </svg>
             </button>
 
             {/* Feedback toast de salto para erro */}
