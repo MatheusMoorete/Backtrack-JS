@@ -245,6 +245,13 @@ export const IncidentHeader: React.FC<IncidentHeaderProps> = ({ artifact, onRese
 
   return (
     <header className="app-header">
+      {diagnostics.degraded && (
+        <div role="alert" style={{ padding: '12px 18px', background: '#422006', color: '#fef3c7' }}>
+          <strong>Gravação incompleta</strong>
+          <ul>{diagnostics.degradedReasons.map((reason, index) => <li key={index}>{reason}</li>)}</ul>
+          {diagnostics.droppedEventsUnknown && <p>A quantidade total de eventos perdidos é desconhecida.</p>}
+        </div>
+      )}
       {/* Faixa Primária: Identidade, Status neutro e Ações */}
       <div className="header-primary-band">
         <div className="header-brand-wrap">
@@ -717,7 +724,9 @@ export const IncidentHeader: React.FC<IncidentHeaderProps> = ({ artifact, onRese
             <span className="meta-label">Viewport:</span>
             <strong className="meta-value">{environment.viewport.width}×{environment.viewport.height}</strong>
           </div>
-          {diagnostics.droppedEvents > 0 ? (
+          {diagnostics.droppedEventsUnknown ? (
+            <div className="meta-chip is-warning">Perdas: quantidade desconhecida</div>
+          ) : diagnostics.droppedEvents > 0 ? (
             <div className="meta-chip meta-chip-drops is-warning">
               <span className="meta-label">Drops:</span>
               <strong className="meta-value">{diagnostics.droppedEvents}</strong>

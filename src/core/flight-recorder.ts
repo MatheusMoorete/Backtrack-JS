@@ -47,6 +47,7 @@ export class FlightRecorderImpl implements FlightRecorder {
   private retentionIntervalTimer: ReturnType<typeof setInterval> | null = null;
   private cachedStorageBytes = 0;
   private cachedIncidentCount = 0;
+  private cachedProtectedBytes = 0;
 
   constructor(options?: FlightRecorderOptions, customDb?: FlightRecorderDB) {
     this.options = {
@@ -255,7 +256,9 @@ export class FlightRecorderImpl implements FlightRecorder {
         (err) => {
           this.stateMachine.transition({
             type: 'DEGRADE',
-            reason: err instanceof Error ? err.message : String(err)
+            reason: err instanceof Error && err.name === 'QuotaExceededError'
+              ? 'A quota do navegador impediu a gravação de um lote.'
+              : 'Falha ao persistir um lote; a gravação pode estar incompleta.'
           });
         }
       );
@@ -267,7 +270,13 @@ export class FlightRecorderImpl implements FlightRecorder {
         environment,
         {
           afterErrorSeconds: this.options.afterErrorSeconds,
-          recorderVersion: this.options.recorderVersion ?? '0.1.1'
+          recorderVersion: this.options.recorderVersion ?? '0.3.5',
+          getRecordingIssues: () => [
+            ...this.stateMachine.getDegradedReasons(),
+            ...((this.rrwebCapturer?.getDroppedEventsCount() ?? 0) > 0
+              ? ['O capturador não conseguiu registrar parte do replay.'] : [])
+          ],
+          getDroppedEventsCount: () => this.rrwebCapturer?.getDroppedEventsCount() ?? 0
         }
       );
 
@@ -326,8 +335,9 @@ export class FlightRecorderImpl implements FlightRecorder {
 
       // Inicia ciclo de retenção periódico (a cada 30 segundos)
       this.retentionIntervalTimer = setInterval(() => {
-        this.retention.prune().catch(() => {});
-        this.updateStatsCache();
+        this.retention.prune().then(() => this.updateStatsCache()).catch(() => {
+          this.stateMachine.transition({ type: 'DEGRADE', reason: 'Falha na manutenção do armazenamento local.' });
+        });
       }, 30000);
 
       this.updateStatsCache();
@@ -347,9 +357,17 @@ export class FlightRecorderImpl implements FlightRecorder {
 
   private async updateStatsCache(): Promise<void> {
     try {
-      this.cachedStorageBytes = await this.db.estimateStorageBytes();
-      const incs = await this.db.listIncidents();
-      this.cachedIncidentCount = incs.length;
+      const breakdown = await this.retention.getStorageBreakdown();
+      this.cachedStorageBytes = breakdown.totalBytes;
+      this.cachedProtectedBytes = breakdown.protectedBytes;
+      this.cachedIncidentCount = breakdown.incidentCount;
+
+      if (breakdown.protectedExceedsLimit) {
+        this.stateMachine.transition({
+          type: 'DEGRADE',
+          reason: 'O armazenamento protegido por incidentes excede o limite configurado (maxStorageMb).'
+        });
+      }
     } catch {
       // Ignora erro ao atualizar cache de stats
     }
@@ -465,7 +483,10 @@ export class FlightRecorderImpl implements FlightRecorder {
     if (!this.incidentManager) {
       // Instancia manager ad-hoc para exportar mesmo se parado
       const env = this.getEnvironmentMetadata();
-      const mgr = new IncidentManager(this.db, '', '', env);
+      const mgr = new IncidentManager(this.db, '', '', env, {
+        recorderVersion: this.options.recorderVersion ?? '0.3.5',
+        getRecordingIssues: () => this.stateMachine.getDegradedReasons()
+      });
       return mgr.exportArtifact(incidentId);
     }
     return this.incidentManager.exportArtifact(incidentId);
@@ -508,25 +529,30 @@ export class FlightRecorderImpl implements FlightRecorder {
   }
 
   public async deleteIncident(incidentId: string): Promise<void> {
-    await this.db.deleteIncident(incidentId);
+    if (this.incidentManager) await this.incidentManager.deleteIncident(incidentId);
+    else await this.db.deleteIncident(incidentId);
+    await this.retention.prune();
     await this.updateStatsCache();
   }
 
   public async clear(): Promise<void> {
     await this.db.clearAll();
     this.cachedStorageBytes = 0;
+    this.cachedProtectedBytes = 0;
     this.cachedIncidentCount = 0;
   }
 
   public getHealth(): RecorderHealth {
     const droppedEvents =
-      (this.retention.getDroppedEventsTotal()) +
-      (this.rrwebCapturer?.getDroppedEventsCount() ?? 0);
+      this.rrwebCapturer?.getDroppedEventsCount() ?? 0;
 
     return {
       state: this.stateMachine.getState(),
       droppedEvents,
       storageBytes: this.cachedStorageBytes,
+      protectedStorageBytes: this.cachedProtectedBytes,
+      storageLimitBytes: (this.options.maxStorageMb ?? 50) * 1024 * 1024,
+      storageLimitExceeded: this.cachedStorageBytes > (this.options.maxStorageMb ?? 50) * 1024 * 1024,
       pendingWrites: this.writer?.getPendingWrites() ?? 0,
       incidentCount: this.cachedIncidentCount,
       reasons: this.stateMachine.getDegradedReasons()

@@ -3,8 +3,7 @@ import { FileImporter } from './components/FileImporter';
 import { IncidentHeader } from './components/IncidentHeader';
 import { ReplayPlayer } from './components/ReplayPlayer';
 import { TimelineView } from './components/TimelineView';
-import { validateFlightRecorderArtifact } from '../src/validation/validate';
-import { decompressArtifact } from '../src/utils/compression';
+import { decompressArtifact, readResponseBytes } from '../src/utils/compression';
 import type { FlightRecorderArtifactV1 } from '../src/types/artifact';
 
 export const App: React.FC = () => {
@@ -39,11 +38,21 @@ export const App: React.FC = () => {
   };
 
   useEffect(() => {
+    let openerOrigin: string | null = null;
+    try {
+      const origin = new URLSearchParams(window.location.search).get('openerOrigin') || document.referrer;
+      if (origin) {
+        const url = new URL(origin);
+        if (url.protocol === 'http:' || url.protocol === 'https:') openerOrigin = url.origin;
+      }
+    } catch { /* Origem inválida: importação por arquivo continua disponível. */ }
+    let disposed = false;
+
     // 1. Notifica o opener (ex: aplicação debugada) que o visualizador está montado e pronto
-    if (window.opener) {
+    if (window.opener && openerOrigin) {
       try {
-        window.opener.postMessage({ type: 'BACKTRACK_VIEWER_READY' }, '*');
-        window.opener.postMessage({ type: 'FFR_VIEWER_READY' }, '*');
+        window.opener.postMessage({ type: 'BACKTRACK_VIEWER_READY' }, openerOrigin);
+        window.opener.postMessage({ type: 'FFR_VIEWER_READY' }, openerOrigin);
       } catch {
         // Ignora caso opener não esteja acessível
       }
@@ -53,51 +62,38 @@ export const App: React.FC = () => {
     try {
       const saved = sessionStorage.getItem('backtrack_active_artifact') || sessionStorage.getItem('ffr_active_artifact');
       if (saved) {
-        const parsed = JSON.parse(saved);
-        const validation = validateFlightRecorderArtifact(parsed);
-        if (validation.success) {
-          const params = typeof window !== 'undefined' && window.location.search ? new URLSearchParams(window.location.search) : null;
-          const initialOffsetMs = parseTimeOffsetParam(params?.get('t') ?? null);
-          handleArtifactLoaded(validation.data, initialOffsetMs);
-        }
+        void decompressArtifact(saved).then((loaded) => {
+          if (disposed) return;
+          const params = new URLSearchParams(window.location.search);
+          handleArtifactLoaded(loaded, parseTimeOffsetParam(params.get('t')));
+        }).catch(() => {});
       }
     } catch {
       // Ignora erro de parse
     }
 
     // 3. Listener para carregar incidentes automaticamente via postMessage
-    const handleMessage = (event: MessageEvent) => {
-      if ((event.data?.type === 'LOAD_BACKTRACK_ARTIFACT' || event.data?.type === 'LOAD_FFR_ARTIFACT') && event.data?.artifact) {
-        const incoming = event.data.artifact;
-
-        // Responde de volta imediatamente para cancelar o timer de reenvio no widget
+    const handleMessage = async (event: MessageEvent) => {
+      if (window.opener && openerOrigin && (event.source !== window.opener || event.origin !== openerOrigin)) return;
+      if (event.data?.type !== 'LOAD_BACKTRACK_ARTIFACT' && event.data?.type !== 'LOAD_FFR_ARTIFACT') return;
+      try {
+        const loaded = await decompressArtifact(event.data.artifact);
+        if (disposed) return;
         if (event.source && 'postMessage' in event.source) {
           try {
-            (event.source as Window).postMessage({ type: 'BACKTRACK_ARTIFACT_RECEIVED' }, '*');
-            (event.source as Window).postMessage({ type: 'FFR_ARTIFACT_RECEIVED' }, '*');
+            (event.source as Window).postMessage({ type: 'BACKTRACK_ARTIFACT_RECEIVED' }, openerOrigin || '*');
+            (event.source as Window).postMessage({ type: 'FFR_ARTIFACT_RECEIVED' }, openerOrigin || '*');
           } catch {
             // Ignora
           }
         }
-
-        // Se o mesmo artefato já está carregado, não recarrega para evitar piscar o player
-        setArtifact((prev) => {
-          if (prev?.incident?.id === incoming.incident?.id) {
-            return prev;
-          }
-          const validation = validateFlightRecorderArtifact(incoming);
-          if (validation.success) {
-            try {
-              sessionStorage.setItem('backtrack_active_artifact', JSON.stringify(validation.data));
-            } catch {
-              // Ignora erro de quota
-            }
-            setCurrentTimeMs(validation.data.incident.startedAt);
-            setMobilePane('replay');
-            return validation.data;
-          }
-          return prev;
-        });
+        setRemoteError(null);
+        setArtifact((previous) => previous?.incident.id === loaded.incident.id ? previous : loaded);
+        setCurrentTimeMs(loaded.incident.startedAt);
+        setMobilePane('replay');
+        try { sessionStorage.setItem('backtrack_active_artifact', JSON.stringify(loaded)); } catch { /* Quota local. */ }
+      } catch (error) {
+        if (!disposed) setRemoteError(error instanceof Error ? error.message : 'Artefato inválido.');
       }
     };
 
@@ -124,7 +120,7 @@ export const App: React.FC = () => {
           if (!res.ok) {
             throw new Error(`Falha ao obter Gist do GitHub (${res.status}): ${res.statusText}`);
           }
-          const gistJson = await res.json();
+          const gistJson = JSON.parse(new TextDecoder().decode(await readResponseBytes(res)));
           const files = gistJson.files ? (Object.values(gistJson.files) as Array<{ content?: string; raw_url?: string; truncated?: boolean }>) : [];
           if (files.length === 0) {
             throw new Error('Nenhum arquivo encontrado no Gist especificado.');
@@ -133,18 +129,8 @@ export const App: React.FC = () => {
           const targetFile = files[0];
           let loadedArtifact: FlightRecorderArtifactV1;
 
-          const readResponseArtifact = async (response: Response): Promise<FlightRecorderArtifactV1> => {
-            if (typeof response.arrayBuffer === 'function') {
-              const buf = await response.arrayBuffer();
-              return decompressArtifact(buf);
-            }
-            if (typeof response.json === 'function') {
-              const json = await response.json();
-              return decompressArtifact(json);
-            }
-            const txt = await response.text();
-            return decompressArtifact(txt);
-          };
+          const readResponseArtifact = async (response: Response): Promise<FlightRecorderArtifactV1> =>
+            decompressArtifact(await readResponseBytes(response));
 
           if (targetFile.truncated && targetFile.raw_url) {
             const rawRes = await fetch(targetFile.raw_url);
@@ -170,11 +156,7 @@ export const App: React.FC = () => {
           if (!res.ok) {
             throw new Error(`Falha ao baixar artefato da URL (${res.status}): ${res.statusText}`);
           }
-          const loadedArtifact = typeof res.arrayBuffer === 'function'
-            ? await decompressArtifact(await res.arrayBuffer())
-            : typeof res.json === 'function'
-              ? await decompressArtifact(await res.json())
-              : await decompressArtifact(await res.text());
+          const loadedArtifact = await decompressArtifact(await readResponseBytes(res));
 
           handleArtifactLoaded(loadedArtifact, initialOffsetMs);
           try {
@@ -194,7 +176,7 @@ export const App: React.FC = () => {
 
     loadRemote();
 
-    return () => window.removeEventListener('message', handleMessage);
+    return () => { disposed = true; window.removeEventListener('message', handleMessage); };
   }, []);
 
   const handleReset = () => {
@@ -231,6 +213,7 @@ export const App: React.FC = () => {
         </>
       ) : (
         <>
+          {remoteError && <div role="alert">Não foi possível carregar o artefato: {remoteError}</div>}
           <IncidentHeader artifact={artifact} onReset={handleReset} />
 
           {/* Abas acessíveis para visualização responsiva (< 960px) */}

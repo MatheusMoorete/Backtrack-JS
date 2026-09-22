@@ -70,7 +70,7 @@ describe('Lote 3 — Viewer do Flight Recorder', () => {
 
     await waitFor(() => {
       expect(screen.getByRole('alert')).toBeDefined();
-      expect(screen.getByText(/não é um json válido/i)).toBeDefined();
+      expect(screen.getByText(/converter dados em JSON|não é um json válido/i)).toBeDefined();
     });
 
     expect(onLoaded).not.toHaveBeenCalled();
@@ -396,6 +396,50 @@ describe('Lote 3 — Viewer do Flight Recorder', () => {
     fireEvent.keyDown(window, { key: 'Escape' });
 
     expect(screen.queryByText('Compartilhar Incidente')).toBeNull();
+  });
+
+  it('exibe aviso de gravação incompleta no header com motivos e nota de eventos desconhecidos quando degraded for true', () => {
+    const degradedArtifact: FlightRecorderArtifactV1 = {
+      ...validArtifact,
+      diagnostics: {
+        degraded: true,
+        degradedReasons: [
+          'Um ou mais lotes da gravação não foram encontrados.',
+          'Parte do replay não pôde ser descomprimida; a gravação pode estar incompleta.'
+        ],
+        droppedEvents: 0,
+        droppedEventsUnknown: true,
+        storageBytes: 1024
+      }
+    };
+
+    render(<IncidentHeader artifact={degradedArtifact} onReset={vi.fn()} />);
+
+    expect(screen.getByRole('alert')).toBeDefined();
+    expect(screen.getByText('Gravação incompleta')).toBeDefined();
+    expect(screen.getByText('Um ou mais lotes da gravação não foram encontrados.')).toBeDefined();
+    expect(
+      screen.getByText('Parte do replay não pôde ser descomprimida; a gravação pode estar incompleta.')
+    ).toBeDefined();
+    expect(screen.getByText(/quantidade total de eventos perdidos é desconhecida/i)).toBeDefined();
+    expect(screen.getByText('Perdas: quantidade desconhecida')).toBeDefined();
+  });
+
+  it('não exibe aviso de gravação incompleta para artefato íntegro (degraded: false)', () => {
+    const cleanArtifact: FlightRecorderArtifactV1 = {
+      ...validArtifact,
+      diagnostics: {
+        degraded: false,
+        degradedReasons: [],
+        droppedEvents: 0,
+        storageBytes: 1024
+      }
+    };
+
+    render(<IncidentHeader artifact={cleanArtifact} onReset={vi.fn()} />);
+
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByText('Gravação incompleta')).toBeNull();
   });
 });
 

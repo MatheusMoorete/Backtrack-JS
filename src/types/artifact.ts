@@ -26,7 +26,9 @@ export interface EnvironmentMetadata {
 }
 
 export interface DiagnosticsMetadata {
+  /** Known losses only; see droppedEventsUnknown for unquantifiable gaps. */
   droppedEvents: number;
+  droppedEventsUnknown?: boolean;
   storageBytes: number;
   degraded: boolean;
   degradedReasons: string[];

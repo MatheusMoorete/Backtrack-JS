@@ -32,6 +32,7 @@ export interface WidgetOptions {
 export interface FlightRecorderOptions {
   bufferMinutes?: number;
   afterErrorSeconds?: number;
+  /** Retention target; saved incidents are protected and may exceed it. */
   maxStorageMb?: number;
   captureHttpStatus?: number[];
   ignoredUrls?: (string | RegExp)[];

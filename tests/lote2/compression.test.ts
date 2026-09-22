@@ -105,5 +105,10 @@ describe('Compressão Gzip Nativa e Descompressão Transparente', () => {
       const invalidSchema = { formatVersion: 99, incident: {} };
       await expect(decompressArtifact(JSON.stringify(invalidSchema))).rejects.toThrow(/Artefato inválido/);
     });
+
+    it('rejeita conteúdo que excede o limite configurado (ex: > limit bytes)', async () => {
+      const payload = 'A'.repeat(2000);
+      await expect(decompressArtifact(payload, 1000)).rejects.toThrow(/excede o limite máximo permitido/);
+    });
   });
 });

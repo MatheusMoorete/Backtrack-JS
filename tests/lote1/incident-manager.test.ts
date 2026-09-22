@@ -114,7 +114,11 @@ describe('Lote 1 — IncidentManager e Exportação', () => {
       startedAt: 1000,
       endedAt: 2000,
       sizeBytes: 150,
-      replay: [{ type: 4, data: {}, timestamp: 1000 }],
+      hasFullSnapshot: true,
+      replay: [
+        { type: 4, data: { href: 'http://localhost/', width: 1024, height: 768 }, timestamp: 1000 },
+        { type: 2, data: { node: { id: 1, type: 0 } }, timestamp: 1000 }
+      ],
       timeline: [{ id: 't1', timestamp: 1000, sequence: 1, type: 'marker', label: 'm1' }]
     };
     const chunk2: StoredChunk = {
@@ -125,7 +129,8 @@ describe('Lote 1 — IncidentManager e Exportação', () => {
       startedAt: 2000,
       endedAt: 3000,
       sizeBytes: 150,
-      replay: [{ type: 2, data: {}, timestamp: 2000 }],
+      hasFullSnapshot: false,
+      replay: [{ type: 3, data: { source: 1, positions: [{ x: 10, y: 10 }] }, timestamp: 2000 }],
       timeline: [{ id: 't2', timestamp: 2500, sequence: 2, type: 'marker', label: 'm2' }]
     };
 
@@ -146,8 +151,85 @@ describe('Lote 1 — IncidentManager e Exportação', () => {
     expect(valResult.success).toBe(true);
 
     expect(artifact.timeline.length).toBe(2);
-    expect(artifact.replay.length).toBe(2);
+    expect(artifact.replay.length).toBe(3);
     expect(artifact.incident.id).toBe(incidentId);
+    expect(artifact.diagnostics.degraded).toBe(false);
+    expect(artifact.diagnostics.degradedReasons).toEqual([]);
+    expect(artifact.diagnostics.droppedEvents).toBe(0);
+
+    manager.destroy();
+  });
+
+  it('marca artefato como incompleto (degraded: true) e droppedEventsUnknown quando lote referenciado não é encontrado', async () => {
+    const manager = new IncidentManager(db, 'sess_missing', 'tab_missing', mockEnv);
+
+    // Salva chunk1, mas não chunk2
+    const chunk1: StoredChunk = {
+      id: 'chk_ok',
+      sessionId: 'sess_missing',
+      tabId: 'tab_missing',
+      sequence: 1,
+      startedAt: 1000,
+      endedAt: 2000,
+      sizeBytes: 150,
+      replay: [{ type: 2, data: {}, timestamp: 1000 }],
+      timeline: []
+    };
+    await db.putChunk(chunk1);
+
+    const incidentId = await manager.trigger('manual', {
+      id: 'trig_miss',
+      timestamp: 3000,
+      type: 'manual',
+      signature: 'manual'
+    });
+
+    // Simula que o incidente referenciou um chunk que depois foi perdido/apagado
+    const storedInc = await db.getIncident(incidentId);
+    if (storedInc) {
+      storedInc.chunkIds.push('chk_lost_id');
+      await db.putIncident(storedInc);
+    }
+
+    const artifact = await manager.exportArtifact(incidentId);
+    expect(artifact.diagnostics.degraded).toBe(true);
+    expect(artifact.diagnostics.degradedReasons).toContain('Um ou mais lotes da gravação não foram encontrados.');
+    expect(artifact.diagnostics.droppedEventsUnknown).toBe(true);
+
+    manager.destroy();
+  });
+
+  it('marca artefato como incompleto (degraded: true) e droppedEventsUnknown quando lote tem replay corrompido', async () => {
+    const manager = new IncidentManager(db, 'sess_corrupt', 'tab_corrupt', mockEnv);
+
+    const chunkCorrupt: StoredChunk = {
+      id: 'chk_corrupt',
+      sessionId: 'sess_corrupt',
+      tabId: 'tab_corrupt',
+      sequence: 1,
+      startedAt: 1000,
+      endedAt: 2000,
+      sizeBytes: 150,
+      replay: [],
+      // Bytes gzip corrompidos / inválidos
+      replayCompressed: new Uint8Array([0x1f, 0x8b, 0xff, 0xff, 0x00, 0x11]),
+      timeline: []
+    };
+    await db.putChunk(chunkCorrupt);
+
+    const incidentId = await manager.trigger('manual', {
+      id: 'trig_corrupt',
+      timestamp: 2000,
+      type: 'manual',
+      signature: 'manual'
+    });
+
+    const artifact = await manager.exportArtifact(incidentId);
+    expect(artifact.diagnostics.degraded).toBe(true);
+    expect(
+      artifact.diagnostics.degradedReasons.some((r) => r.includes('Parte do replay não pôde ser descomprimida'))
+    ).toBe(true);
+    expect(artifact.diagnostics.droppedEventsUnknown).toBe(true);
 
     manager.destroy();
   });

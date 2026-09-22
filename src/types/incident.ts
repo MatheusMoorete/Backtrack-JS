@@ -25,6 +25,7 @@ export interface StoredIncident {
   finalizedAt?: number;
   state: 'pending' | 'finalized';
   chunkIds: string[];
+  recordingIssues?: string[];
 }
 
 export interface IncidentSummary {

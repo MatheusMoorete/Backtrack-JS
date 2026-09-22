@@ -86,4 +86,74 @@ describe('Lote 0 — Validação do Artefato v1', () => {
     const sorted = sortTimelineEvents(unorderedEvents);
     expect(sorted.map(e => e.id)).toEqual(['1', '2b', '2', '3']);
   });
+
+  it('rejeita replay contendo evento nulo ou inválido (ex: replay: [null])', () => {
+    const withNullReplay = {
+      ...fixtureContent,
+      replay: [null as unknown]
+    };
+    const res = validateFlightRecorderArtifact(withNullReplay);
+    expect(res.success).toBe(false);
+    if (!res.success) {
+      expect(res.errors.some((e) => e.includes('Evento de replay inválido'))).toBe(true);
+    }
+  });
+
+  it('rejeita incidente com término anterior ao início (duração negativa)', () => {
+    const negativeDuration = {
+      ...fixtureContent,
+      incident: {
+        ...fixtureContent.incident,
+        startedAt: 2000,
+        finalizedAt: 1000 // menor que startedAt
+      }
+    };
+    const res = validateFlightRecorderArtifact(negativeDuration);
+    expect(res.success).toBe(false);
+    if (!res.success) {
+      expect(res.errors.some((e) => e.includes('término do incidente não pode anteceder o início'))).toBe(true);
+    }
+  });
+
+  it('rejeita dimensões de viewport inválidas ou não-positivas', () => {
+    const zeroWidth = {
+      ...fixtureContent,
+      environment: {
+        ...fixtureContent.environment,
+        viewport: { width: 0, height: 768 }
+      }
+    };
+    const res = validateFlightRecorderArtifact(zeroWidth);
+    expect(res.success).toBe(false);
+    if (!res.success) {
+      expect(res.errors.some((e) => e.includes('Dimensões da viewport inválidas'))).toBe(true);
+    }
+  });
+
+  it('preserva e aceita eventos Meta legítimos ocorrendo antes de startedAt', () => {
+    const startedAt = 10000;
+    const metaEvent = {
+      type: 4,
+      data: { href: 'http://localhost/', width: 1920, height: 1080 },
+      timestamp: startedAt - 1 // Meta antes do início
+    };
+    const snapshotEvent = {
+      type: 2,
+      data: { node: { id: 1, type: 0 } },
+      timestamp: startedAt
+    };
+
+    const validWithEarlyMeta = {
+      ...fixtureContent,
+      incident: {
+        ...fixtureContent.incident,
+        startedAt,
+        finalizedAt: startedAt + 5000
+      },
+      replay: [metaEvent, snapshotEvent]
+    };
+
+    const res = validateFlightRecorderArtifact(validWithEarlyMeta);
+    expect(res.success).toBe(true);
+  });
 });

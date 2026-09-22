@@ -101,4 +101,53 @@ export class RetentionEngine {
       remainingBytes: currentBytes
     };
   }
+
+  /**
+   * Retorna o detalhamento do armazenamento entre buffer temporário e chunks protegidos por incidentes.
+   */
+  public async getStorageBreakdown(): Promise<StorageBreakdown> {
+    const incidents = await this.db.getAllIncidents();
+    const protectedChunkIds = new Set<string>();
+    for (const inc of incidents) {
+      for (const cid of inc.chunkIds) {
+        protectedChunkIds.add(cid);
+      }
+    }
+
+    const allChunks = await this.db.getAllChunks();
+    let protectedBytes = 0;
+    let bufferBytes = 0;
+
+    for (const chunk of allChunks) {
+      const bytes = chunk.sizeBytes || 0;
+      if (protectedChunkIds.has(chunk.id)) {
+        protectedBytes += bytes;
+      } else {
+        bufferBytes += bytes;
+      }
+    }
+
+    const totalBytes = protectedBytes + bufferBytes;
+    const maxStorageBytes = this.config.maxStorageMb * 1024 * 1024;
+
+    return {
+      totalBytes,
+      protectedBytes,
+      bufferBytes,
+      maxStorageBytes,
+      isOverLimit: totalBytes > maxStorageBytes,
+      protectedExceedsLimit: protectedBytes > maxStorageBytes,
+      incidentCount: incidents.length
+    };
+  }
+}
+
+export interface StorageBreakdown {
+  totalBytes: number;
+  protectedBytes: number;
+  bufferBytes: number;
+  maxStorageBytes: number;
+  isOverLimit: boolean;
+  protectedExceedsLimit: boolean;
+  incidentCount: number;
 }

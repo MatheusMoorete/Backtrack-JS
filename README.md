@@ -37,7 +37,7 @@ import { Backtrack } from '@backtrack/browser';
 const recorder = new Backtrack({
   bufferMinutes: 5,         // Keep last 5 minutes of activity in rolling buffer
   afterErrorSeconds: 15,    // Keep recording for 15 seconds after an error occurs
-  maxStorageMb: 50,         // Maximum storage quota in IndexedDB
+  maxStorageMb: 50,         // Retention target for rolling buffer (protected incidents are never auto-pruned)
   captureHttpStatus: [500, 502, 503, 504], // Auto-trigger on server errors
   privacy: {
     maskAllInputs: true,    // Mask all form inputs by default

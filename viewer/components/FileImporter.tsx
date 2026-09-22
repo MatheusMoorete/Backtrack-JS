@@ -1,7 +1,6 @@
 import React, { useState, useRef } from 'react';
 import type { FlightRecorderArtifactV1 } from '../../src/types/artifact';
-import { validateFlightRecorderArtifact } from '../../src/validation/validate';
-import { decompressGzip } from '../../src/utils/compression';
+import { decompressArtifact, MAX_ARTIFACT_BYTES, readLimitedStream } from '../../src/utils/compression';
 
 interface FileImporterProps {
   onArtifactLoaded: (artifact: FlightRecorderArtifactV1) => void;
@@ -10,7 +9,7 @@ interface FileImporterProps {
 
 export const FileImporter: React.FC<FileImporterProps> = ({
   onArtifactLoaded,
-  maxSizeBytes = 50 * 1024 * 1024
+  maxSizeBytes = MAX_ARTIFACT_BYTES
 }) => {
   const [isDragOver, setIsDragOver] = useState(false);
   const [errorMessages, setErrorMessages] = useState<string[] | null>(null);
@@ -27,36 +26,16 @@ export const FileImporter: React.FC<FileImporterProps> = ({
     }
 
     try {
-      const buffer = await file.arrayBuffer();
-      let text: string;
-      try {
-        text = await decompressGzip(new Uint8Array(buffer));
-      } catch (err) {
-        setErrorMessages([`Falha ao descompactar arquivo: ${err instanceof Error ? err.message : String(err)}`]);
-        return;
-      }
-
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(text);
-      } catch {
-        setErrorMessages(['O arquivo importado não é um JSON válido. Verifique se o arquivo está corrompido.']);
-        return;
-      }
-
-      const validation = validateFlightRecorderArtifact(parsed);
-      if (!validation.success) {
-        setErrorMessages(validation.errors);
-        return;
-      }
+      const bytes = await readLimitedStream(file.stream(), maxSizeBytes);
+      const artifact = await decompressArtifact(bytes, maxSizeBytes);
 
       try {
-        sessionStorage.setItem('ffr_active_artifact', JSON.stringify(validation.data));
+        sessionStorage.setItem('ffr_active_artifact', JSON.stringify(artifact));
       } catch {
         // Ignora erro de quota
       }
 
-      onArtifactLoaded(validation.data);
+      onArtifactLoaded(artifact);
     } catch (err) {
       setErrorMessages([`Falha ao ler arquivo: ${err instanceof Error ? err.message : String(err)}`]);
     }
@@ -126,7 +105,7 @@ export const FileImporter: React.FC<FileImporterProps> = ({
         </button>
 
         <p className="importer-hint">
-          Processamento local seguro no navegador. Formato suportado: .ffr.json (máximo {Math.round(maxSizeBytes / (1024 * 1024))} MB).
+          Processamento local seguro no navegador. Formatos: .ffr.json e .ffr.json.gz (antes e após descompressão, máximo {Math.round(maxSizeBytes / (1024 * 1024))} MB).
         </p>
 
         <input

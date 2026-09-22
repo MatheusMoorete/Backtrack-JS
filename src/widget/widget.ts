@@ -494,8 +494,14 @@ export class BacktrackWidget {
 
   private async handleDeleteIncident(incidentId: string): Promise<void> {
     try {
+      if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
+        if (!window.confirm('Deseja realmente excluir esta gravação?')) {
+          return;
+        }
+      }
       await this.recorder.deleteIncident(incidentId);
       await this.updateData();
+      this.render();
     } catch {
       alert('Falha ao excluir incidente.');
     }
@@ -647,10 +653,11 @@ export class BacktrackWidget {
                         <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
                       </svg>
                     </button>
-                    • ${this.formatBytes(this.health?.storageBytes ?? 0)}
+                    • ${this.formatBytes(this.health?.storageBytes ?? 0)}${this.health?.protectedStorageBytes ? ` (protegido: ${this.formatBytes(this.health.protectedStorageBytes)})` : ''}
+                    ${this.health?.storageLimitExceeded ? '<span style="color: #f59e0b; margin-left: 2px;" title="Limite excedido por incidentes salvos">⚠️</span>' : ''}
                     <span
                       class="backtrack-storage-tooltip-trigger"
-                      title="Os dados de replay são armazenados localmente no IndexedDB do seu navegador. O limite máximo é de 50 MB (gravações antigas são recicladas automaticamente)."
+                      title="Os dados de replay são armazenados localmente no IndexedDB do seu navegador. O limite máximo é de 50 MB (gravações antigas são recicladas automaticamente). Chunks protegidos por incidentes não são apagados pela retenção."
                       aria-label="Informações sobre o armazenamento local no IndexedDB"
                     >
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
@@ -970,7 +977,8 @@ export class BacktrackWidget {
               <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
             </svg>
           </button>
-          • ${this.formatBytes(this.health?.storageBytes ?? 0)}
+          • ${this.formatBytes(this.health?.storageBytes ?? 0)}${this.health?.protectedStorageBytes ? ` (protegido: ${this.formatBytes(this.health.protectedStorageBytes)})` : ''}
+          ${this.health?.storageLimitExceeded ? '<span style="color: #f59e0b; margin-left: 2px;" title="Limite excedido por incidentes salvos">⚠️</span>' : ''}
         `;
         this.attachConfigViewerListener();
       }

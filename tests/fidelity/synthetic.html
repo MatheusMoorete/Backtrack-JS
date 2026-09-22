@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Backtrack Synthetic Fidelity Test Page</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      margin: 20px;
+      padding: 0;
+      color: #1f2937;
+      background: #f9fafb;
+    }
+    .section {
+      background: #ffffff;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    h2 {
+      margin-top: 0;
+      font-size: 1.1rem;
+      color: #374151;
+    }
+    button {
+      background: #3b82f6;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      padding: 6px 12px;
+      cursor: pointer;
+      font-size: 0.9rem;
+      margin-right: 8px;
+    }
+    button:hover {
+      background: #2563eb;
+    }
+    .btn-danger {
+      background: #ef4444;
+    }
+    .btn-danger:hover {
+      background: #dc2626;
+    }
+    .synthetic-item {
+      padding: 8px;
+      margin: 4px 0;
+      background: #e0e7ff;
+      border: 1px solid #c7d2fe;
+      border-radius: 4px;
+      font-weight: 500;
+    }
+    .scroll-container {
+      height: 120px;
+      overflow-y: scroll;
+      border: 1px solid #d1d5db;
+      padding: 8px;
+      background: #f3f4f6;
+    }
+    .scroll-content {
+      height: 400px;
+      background: linear-gradient(180deg, #dbeafe 0%, #93c5fd 50%, #3b82f6 100%);
+      padding: 10px;
+      color: #1e3a8a;
+      font-weight: bold;
+    }
+    .modal-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.4);
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    .modal-backdrop.is-open {
+      display: flex;
+    }
+    .modal-box {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      width: 320px;
+    }
+    input, textarea, select {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 6px;
+      margin-top: 4px;
+      margin-bottom: 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 4px;
+    }
+    canvas {
+      border: 1px solid #9ca3af;
+      background: #ffffff;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <h1>Página de Teste Sintético — Fidelidade Backtrack</h1>
+
+  <!-- 1. Criação e Remoção de Nós DOM -->
+  <div class="section" id="dom-section">
+    <h2>1. Elementos Dinâmicos do DOM</h2>
+    <div style="margin-bottom: 10px;">
+      <button type="button" id="btn-add-item">Criar Elemento</button>
+      <button type="button" id="btn-remove-item" class="btn-danger">Remover Primeiro</button>
+    </div>
+    <div id="item-list"></div>
+  </div>
+
+  <!-- 2. Formulário e Digitação -->
+  <div class="section" id="form-section">
+    <h2>2. Formulário Interativo</h2>
+    <form id="synthetic-form" onsubmit="return false;">
+      <label>
+        Nome Completo:
+        <input type="text" id="input-name" placeholder="Digite seu nome" />
+      </label>
+      <label>
+        Email:
+        <input type="email" id="input-email" placeholder="email@exemplo.com" />
+      </label>
+      <label>
+        Observações:
+        <textarea id="input-notes" rows="2" placeholder="Observações do teste"></textarea>
+      </label>
+      <div id="form-status" style="font-size: 0.85rem; color: #059669;"></div>
+    </form>
+  </div>
+
+  <!-- 3. Rolagem e Modal -->
+  <div class="section" id="scroll-modal-section">
+    <h2>3. Modal e Rolagem</h2>
+    <button type="button" id="btn-open-modal">Abrir Modal</button>
+    <div style="margin-top: 12px;">
+      <div class="scroll-container" id="scroll-container">
+        <div class="scroll-content" id="scroll-content">
+          Início do conteúdo rolável...<br /><br />
+          Linha intermediária para rolagem...<br /><br /><br />
+          Fim do conteúdo rolável (ponto alvo).
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal -->
+  <div class="modal-backdrop" id="synthetic-modal">
+    <div class="modal-box">
+      <h3>Modal Sintético</h3>
+      <p id="modal-text">Este modal foi aberto durante a gravação.</p>
+      <button type="button" id="btn-close-modal">Fechar</button>
+    </div>
+  </div>
+
+  <!-- 4. Canvas e Viewport -->
+  <div class="section" id="canvas-section">
+    <h2>4. Canvas e Gráficos</h2>
+    <button type="button" id="btn-draw-canvas">Desenhar no Canvas</button>
+    <div style="margin-top: 10px;">
+      <canvas id="synthetic-canvas" width="300" height="120"></canvas>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script type="module" src="./synthetic.ts"></script>
+</body>
+</html>

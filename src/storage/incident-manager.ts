@@ -13,6 +13,8 @@ import { decompressGzip } from '../utils/compression';
 export interface IncidentManagerConfig {
   afterErrorSeconds: number; // default 15
   recorderVersion: string;   // default '0.1.0'
+  getRecordingIssues?: () => string[];
+  getDroppedEventsCount?: () => number;
 }
 
 /**
@@ -139,7 +141,8 @@ export class IncidentManager {
     this.environment = environment;
     this.config = {
       afterErrorSeconds: config?.afterErrorSeconds ?? 15,
-      recorderVersion: config?.recorderVersion ?? '0.1.0'
+      recorderVersion: config?.recorderVersion ?? '0.1.0',
+      getRecordingIssues: config?.getRecordingIssues
     };
   }
 
@@ -207,6 +210,7 @@ export class IncidentManager {
         triggeredAt: now,
         finalizeAt: now + this.config.afterErrorSeconds * 1000,
         state: 'pending',
+        recordingIssues: this.config.getRecordingIssues?.() ?? [],
         chunkIds: chunks.map((c) => c.id)
       };
 
@@ -354,6 +358,7 @@ export class IncidentManager {
       finalizeAt: now,
       finalizedAt: now,
       state: 'finalized',
+      recordingIssues: this.config.getRecordingIssues?.() ?? [],
       chunkIds: selectedChunks.map((c) => c.id)
     };
 
@@ -396,6 +401,7 @@ export class IncidentManager {
     const relevantChunks = sessionChunks.filter((c) => c.startedAt <= finalizedAt);
     const allChunkIds = Array.from(new Set([...incident.chunkIds, ...relevantChunks.map((c) => c.id)]));
 
+    incident.recordingIssues = [...new Set([...(incident.recordingIssues ?? []), ...(this.config.getRecordingIssues?.() ?? [])])];
     incident.state = 'finalized';
     incident.finalizedAt = finalizedAt;
     incident.chunkIds = allChunkIds;
@@ -429,7 +435,17 @@ export class IncidentManager {
       throw new Error(`Incidente "${incidentId}" não encontrado.`);
     }
 
+    const issues = new Set(incident.recordingIssues ?? []);
     const chunks = await this.db.getChunksByIds(incident.chunkIds);
+    const foundIds = new Set(chunks.map((chunk) => chunk.id));
+    let hasMissingChunks = false;
+    let hasCorruptedChunks = false;
+
+    const missingChunkIds = incident.chunkIds.filter((id) => !foundIds.has(id));
+    if (missingChunkIds.length > 0) {
+      hasMissingChunks = true;
+      issues.add('Um ou mais lotes da gravação não foram encontrados.');
+    }
     chunks.sort((a, b) => (a.startedAt !== b.startedAt ? a.startedAt - b.startedAt : a.sequence - b.sequence));
 
     const mergedTimeline = chunks.flatMap((c) => c.timeline || []);
@@ -443,8 +459,12 @@ export class IncidentManager {
           if (c.replayCompressed && c.replayCompressed.length > 0) {
             try {
               const text = await decompressGzip(c.replayCompressed);
-              return JSON.parse(text) as RrwebEvent[];
+              const replay: unknown = JSON.parse(text);
+              if (!Array.isArray(replay)) throw new Error('Replay inválido');
+              return replay as RrwebEvent[];
             } catch {
+              hasCorruptedChunks = true;
+              issues.add('Parte do replay não pôde ser descomprimida; a gravação pode estar incompleta.');
               return c.replay || [];
             }
           }
@@ -458,7 +478,13 @@ export class IncidentManager {
       incident.finalizedAt ?? incident.finalizeAt
     );
 
+    if (!slicedReplay.some((event) => event.type === 2 && event.timestamp <= incident.startedAt)) {
+      issues.add('Não há snapshot para reconstruir o início da gravação.');
+    }
+
     const totalStorageBytes = chunks.reduce((acc, c) => acc + (c.sizeBytes || 0), 0);
+    const knownDroppedEvents = this.config.getDroppedEventsCount?.() ?? 0;
+    const hasUnquantifiableLoss = hasMissingChunks || hasCorruptedChunks;
 
     const artifact: FlightRecorderArtifactV1 = {
       formatVersion: 1,
@@ -481,10 +507,11 @@ export class IncidentManager {
       timeline: filteredTimeline,
       replay: slicedReplay,
       diagnostics: {
-        droppedEvents: 0,
+        droppedEvents: knownDroppedEvents,
+        droppedEventsUnknown: hasUnquantifiableLoss || (issues.size > 0 && knownDroppedEvents === 0),
         storageBytes: totalStorageBytes,
-        degraded: false,
-        degradedReasons: []
+        degraded: issues.size > 0,
+        degradedReasons: [...issues]
       }
     };
 
