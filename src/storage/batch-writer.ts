@@ -99,13 +99,19 @@ export class BatchWriter {
 
     // Se não há chunk atual ou se o chunk excedeu a duração padrão, abre um novo
     if (!this.currentChunk || now - this.currentChunk.startedAt >= this.config.chunkDurationMs) {
+      const allEventsTs = [
+        ...timelineToFlush.map((e) => e.timestamp),
+        ...replayToFlush.map((e) => e.timestamp)
+      ];
+      const chunkStartedAt = allEventsTs.length > 0 ? Math.min(...allEventsTs) : now;
+
       this.chunkSequence++;
       this.currentChunk = {
-        id: `chk_${this.sessionId}_${this.chunkSequence}_${now}`,
+        id: `chk_${this.sessionId}_${this.chunkSequence}_${chunkStartedAt}`,
         sessionId: this.sessionId,
         tabId: this.tabId,
         sequence: this.chunkSequence,
-        startedAt: now,
+        startedAt: chunkStartedAt,
         endedAt: now,
         sizeBytes: 0,
         replay: [],
@@ -115,7 +121,12 @@ export class BatchWriter {
 
     this.currentChunk.timeline.push(...timelineToFlush);
     this.currentChunk.replay.push(...replayToFlush);
-    this.currentChunk.endedAt = now;
+    const allFlushTs = [
+      ...timelineToFlush.map((e) => e.timestamp),
+      ...replayToFlush.map((e) => e.timestamp),
+      now
+    ];
+    this.currentChunk.endedAt = Math.max(this.currentChunk.endedAt, ...allFlushTs);
 
     // Estimativa grosseira de bytes do chunk
     const serialized = JSON.stringify(this.currentChunk);

@@ -67,7 +67,8 @@ export class FlightRecorderImpl implements FlightRecorder {
         maskTextSelector: options?.privacy?.maskTextSelector,
         sanitizeUrl: options?.privacy?.sanitizeUrl,
         sensitiveRoutes: options?.privacy?.sensitiveRoutes,
-        autoMaskPII: options?.privacy?.autoMaskPII
+        autoMaskPII: options?.privacy?.autoMaskPII,
+        recordCanvas: options?.privacy?.recordCanvas
       }
     };
 

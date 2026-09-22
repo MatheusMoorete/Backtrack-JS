@@ -47,15 +47,13 @@ export function sliceReplayEventsForWindow(
     return inWindow;
   }
 
-  // Busca o FullSnapshot (type: 2) mais recente anterior ou igual a startedAt
+  // Busca o FullSnapshot (type: 2) mais recente anterior ou igual a startedAt.
+  // NÃO busca snapshots futuros (evita que tela futura apareça no início da gravação).
   const priorSnapshots = sorted.filter((e) => e.type === 2 && e.timestamp <= startedAt);
-  const baseSnapshot =
-    priorSnapshots.length > 0
-      ? priorSnapshots[priorSnapshots.length - 1]
-      : sorted.find((e) => e.type === 2);
+  const baseSnapshot = priorSnapshots.length > 0 ? priorSnapshots[priorSnapshots.length - 1] : null;
 
   if (!baseSnapshot) {
-    // Se não encontrou snapshot nenhum, retorna os eventos da janela
+    // Se não encontrou snapshot anterior, retorna os eventos da janela
     return inWindow;
   }
 
@@ -64,6 +62,17 @@ export function sliceReplayEventsForWindow(
     (e) => e.type === 4 && e.timestamp <= baseSnapshot.timestamp
   );
   const baseMeta = priorMetas.length > 0 ? priorMetas[priorMetas.length - 1] : null;
+
+  // Busca as mutações ocorridas entre o snapshot base e o início da janela (startedAt).
+  // Essas alterações são fundamentais para que o DOM esteja reconstruído no estado real
+  // do momento startedAt, evitando perda de nós criados nesse intervalo.
+  const intermediateMutations = sorted.filter(
+    (e) =>
+      e.timestamp > baseSnapshot.timestamp &&
+      e.timestamp < startedAt &&
+      e.type !== 2 &&
+      e.type !== 4
+  );
 
   const result: RrwebEvent[] = [];
 
@@ -79,6 +88,14 @@ export function sliceReplayEventsForWindow(
     ...baseSnapshot,
     timestamp: startedAt
   });
+
+  // Mutações intermediárias aplicadas no frame inicial (startedAt) para reconstituir o DOM fielmente
+  for (const ev of intermediateMutations) {
+    result.push({
+      ...ev,
+      timestamp: startedAt
+    });
+  }
 
   // Eventos incrementais ocorridos dentro da janela
   for (const ev of inWindow) {
@@ -337,11 +354,15 @@ export class IncidentManager {
     }
 
     const now = Date.now();
+    // Clampa finalizedAt para não ultrapassar finalizeAt programado (evita aumento artificial da duração pós-reload)
+    const finalizedAt = incident.finalizeAt ? Math.min(now, incident.finalizeAt) : now;
     const sessionChunks = await this.db.getChunksBySession(this.sessionId);
-    const allChunkIds = Array.from(new Set([...incident.chunkIds, ...sessionChunks.map((c) => c.id)]));
+    // Associa apenas chunks ocorridos até o encerramento real do incidente
+    const relevantChunks = sessionChunks.filter((c) => c.startedAt <= finalizedAt);
+    const allChunkIds = Array.from(new Set([...incident.chunkIds, ...relevantChunks.map((c) => c.id)]));
 
     incident.state = 'finalized';
-    incident.finalizedAt = now;
+    incident.finalizedAt = finalizedAt;
     incident.chunkIds = allChunkIds;
 
     await this.db.putIncident(incident);

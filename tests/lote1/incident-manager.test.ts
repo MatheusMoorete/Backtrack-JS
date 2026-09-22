@@ -342,11 +342,11 @@ describe('Lote 1 — IncidentManager e Exportação', () => {
       expect(sliceReplayEventsForWindow([], 1000, 2000)).toEqual([]);
     });
 
-    it('reposiciona o FullSnapshot e Meta no início da janela descartando eventos anteriores', () => {
+    it('reposiciona o FullSnapshot e Meta no início da janela preservando mutações intermediárias para reconstituir o DOM', () => {
       const events = [
         { type: 4, data: { width: 1920, height: 1080 }, timestamp: 1000 },
         { type: 2, data: { node: 'root' }, timestamp: 1005 },
-        { type: 3, data: { d: 'old mutation' }, timestamp: 5000 },
+        { type: 3, data: { d: 'intermediate mutation' }, timestamp: 5000 },
         { type: 3, data: { d: 'mutation 1' }, timestamp: 60000 },
         { type: 3, data: { d: 'mutation 2' }, timestamp: 65000 }
       ];
@@ -354,17 +354,33 @@ describe('Lote 1 — IncidentManager e Exportação', () => {
       // Janela de 60s a 70s
       const sliced = sliceReplayEventsForWindow(events, 60000, 70000);
 
-      // Deve conter Meta (59999), FullSnapshot (60000) e as duas mutações dentro da janela
-      // e NÃO conter a mutação antiga de 5000
-      expect(sliced.length).toBe(4);
+      // Deve conter Meta (59999), FullSnapshot (60000), a mutação intermediária reposicionada no início (60000)
+      // para garantir a reconstrução correta do DOM, e as duas mutações dentro da janela
+      expect(sliced.length).toBe(5);
       expect(sliced[0].type).toBe(4);
       expect(sliced[0].timestamp).toBe(59999);
       expect(sliced[1].type).toBe(2);
       expect(sliced[1].timestamp).toBe(60000);
-      expect(sliced[2].data).toEqual({ d: 'mutation 1' });
+      expect(sliced[2].data).toEqual({ d: 'intermediate mutation' });
       expect(sliced[2].timestamp).toBe(60000);
-      expect(sliced[3].data).toEqual({ d: 'mutation 2' });
-      expect(sliced[3].timestamp).toBe(65000);
+      expect(sliced[3].data).toEqual({ d: 'mutation 1' });
+      expect(sliced[3].timestamp).toBe(60000);
+      expect(sliced[4].data).toEqual({ d: 'mutation 2' });
+      expect(sliced[4].timestamp).toBe(65000);
+    });
+
+    it('NÃO busca snapshots futuros fora da janela se não houver snapshot anterior', () => {
+      const events = [
+        { type: 3, data: { d: 'mutation early' }, timestamp: 2000 },
+        { type: 2, data: { node: 'future root' }, timestamp: 5000 }
+      ];
+
+      // Janela de 2000 a 3000 (termina antes do snapshot de 5000)
+      const sliced = sliceReplayEventsForWindow(events, 2000, 3000);
+
+      // Não deve puxar o snapshot futuro de 5000 para o início
+      expect(sliced.length).toBe(1);
+      expect(sliced[0].data).toEqual({ d: 'mutation early' });
     });
 
     it('preserva eventos quando a janela já possui FullSnapshot no início', () => {

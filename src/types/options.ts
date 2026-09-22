@@ -19,6 +19,7 @@ export interface PrivacyOptions {
   sanitizeUrl?: (url: URL) => string;
   sensitiveRoutes?: RouteMatcher[];
   autoMaskPII?: boolean;
+  recordCanvas?: boolean;
 }
 
 export interface WidgetOptions {

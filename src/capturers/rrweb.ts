@@ -98,8 +98,8 @@ export class RrwebCapturer {
           scroll: 150,
           input: 'last'
         },
-        // Bloqueio estrito de mídia e canvas conforme SPEC.md
-        recordCanvas: false,
+        // Gravação de canvas: respeita flag explícita ou habilita quando blockMedia for false
+        recordCanvas: privacy.recordCanvas ?? (privacy.blockMedia === false),
         collectFonts: false
       }) || null;
     } catch {
