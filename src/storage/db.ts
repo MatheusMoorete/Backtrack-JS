@@ -172,7 +172,7 @@ export class FlightRecorderDB {
       const req = index.getAll(sessionId);
       req.onsuccess = () => {
         const chunks = (req.result || []) as StoredChunk[];
-        chunks.sort((a, b) => a.sequence - b.sequence);
+        chunks.sort((a, b) => (a.startedAt !== b.startedAt ? a.startedAt - b.startedAt : a.sequence - b.sequence));
         resolve(chunks);
       };
       req.onerror = () => reject(req.error);

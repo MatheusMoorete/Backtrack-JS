@@ -164,15 +164,31 @@ describe('Backtrack v0.1.2 — Widget Nativo e Privacidade por Rota', () => {
       // Botões de duração
       const btn60 = host?.shadowRoot?.getElementById('btn-duration-60');
       const btn300 = host?.shadowRoot?.getElementById('btn-duration-300');
+      const btnAll = host?.shadowRoot?.getElementById('btn-duration-all');
       const btnCustom = host?.shadowRoot?.getElementById('btn-duration-custom');
 
       expect(btn60).not.toBeNull();
       expect(btn300).not.toBeNull();
+      expect(btnAll).not.toBeNull();
       expect(btnCustom).not.toBeNull();
 
-      // Inicialmente 1 min está selecionado
-      expect(btn60?.classList.contains('is-selected')).toBe(true);
+      // Inicialmente 5 min está selecionado por padrão
+      expect(btn300?.classList.contains('is-selected')).toBe(true);
+      expect(btn60?.classList.contains('is-selected')).toBe(false);
+      expect(btnAll?.classList.contains('is-selected')).toBe(false);
       expect(host?.shadowRoot?.getElementById('input-custom-duration')).toBeNull();
+
+      // Clica em Tudo
+      btnAll?.click();
+      const updatedBtnAll = host?.shadowRoot?.getElementById('btn-duration-all');
+      expect(updatedBtnAll?.classList.contains('is-selected')).toBe(true);
+      expect((widget as unknown as { selectedDurationSeconds: number }).selectedDurationSeconds).toBe(0);
+
+      // Clica em 1 min
+      btn60?.click();
+      const updatedBtn60 = host?.shadowRoot?.getElementById('btn-duration-60');
+      expect(updatedBtn60?.classList.contains('is-selected')).toBe(true);
+      expect((widget as unknown as { selectedDurationSeconds: number }).selectedDurationSeconds).toBe(60);
 
       // Clica em Custom
       btnCustom?.click();
@@ -202,8 +218,8 @@ describe('Backtrack v0.1.2 — Widget Nativo e Privacidade por Rota', () => {
       expect((widget as unknown as { selectedDurationSeconds: number }).selectedDurationSeconds).toBe(900);
 
       // Alterna de volta para 5 min
-      const updatedBtn300 = host?.shadowRoot?.getElementById('btn-duration-300');
-      updatedBtn300?.click();
+      const finalBtn300Trigger = host?.shadowRoot?.getElementById('btn-duration-300');
+      finalBtn300Trigger?.click();
       const finalBtn300 = host?.shadowRoot?.getElementById('btn-duration-300');
       expect(finalBtn300?.classList.contains('is-selected')).toBe(true);
       expect((widget as unknown as { selectedDurationSeconds: number }).selectedDurationSeconds).toBe(300);

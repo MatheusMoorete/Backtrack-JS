@@ -16,7 +16,7 @@ export class BacktrackWidget {
   private shadow: ShadowRoot | null = null;
 
   private isOpen = false;
-  private selectedDurationSeconds = 60; // 1m default
+  private selectedDurationSeconds = 300; // 5m default (ou 0 para Tudo)
   private isCapturing = false;
   private isViewerOnline = false;
   private incidents: IncidentSummary[] = [];
@@ -39,8 +39,12 @@ export class BacktrackWidget {
     this.options = {
       position: options?.position ?? 'bottom-left',
       defaultViewerUrl: options?.defaultViewerUrl ?? DEFAULT_VIEWER_URL,
-      zIndex: options?.zIndex ?? 999999
+      zIndex: options?.zIndex ?? 999999,
+      defaultDurationSeconds: options?.defaultDurationSeconds
     };
+    if (this.options.defaultDurationSeconds !== undefined) {
+      this.selectedDurationSeconds = this.options.defaultDurationSeconds;
+    }
   }
 
   public mount(): void {
@@ -243,7 +247,8 @@ export class BacktrackWidget {
     this.render();
 
     try {
-      const id = await this.recorder.capture('Captura manual', this.selectedDurationSeconds);
+      const duration = this.selectedDurationSeconds > 0 ? this.selectedDurationSeconds : undefined;
+      const id = await this.recorder.capture('Captura manual', duration);
       this.alertMessage = `Incidente ${id.substring(0, 14)}... gravado!`;
       await this.updateData();
     } catch (err) {
@@ -467,7 +472,8 @@ export class BacktrackWidget {
         const reason = result.notes?.trim()
           ? `Anotação do QA: ${result.notes.trim()}`
           : 'Anotação visual de bug na tela';
-        await this.recorder.capture(reason, this.selectedDurationSeconds, {
+        const duration = this.selectedDurationSeconds > 0 ? this.selectedDurationSeconds : undefined;
+        await this.recorder.capture(reason, duration, {
           annotationImage: result.dataUrl,
           notes: result.notes
         });
@@ -682,7 +688,7 @@ export class BacktrackWidget {
                   <div class="backtrack-section-title">Janela de Gravação</div>
                   <span
                     class="backtrack-help-tooltip-trigger"
-                    title="Quanto tempo de histórico retroativo será gravado antes do clique (de 5 segundos até 15 minutos)."
+                    title="Quanto tempo de histórico retroativo será gravado antes do clique (de 5 segundos até 15 minutos: 1 min, 5 min, Tudo disponível no buffer ou Custom)."
                   >
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
                       <circle cx="12" cy="12" r="10" />
@@ -709,6 +715,14 @@ export class BacktrackWidget {
                   </button>
                   <button
                     type="button"
+                    class="backtrack-duration-btn ${!this.isCustomDuration && this.selectedDurationSeconds === 0 ? 'is-selected' : ''}"
+                    id="btn-duration-all"
+                    title="Grava todo o histórico da sessão disponível no buffer"
+                  >
+                    Tudo
+                  </button>
+                  <button
+                    type="button"
                     class="backtrack-duration-btn ${this.isCustomDuration ? 'is-selected' : ''}"
                     id="btn-duration-custom"
                   >
@@ -726,7 +740,7 @@ export class BacktrackWidget {
                         id="input-custom-duration"
                         min="5"
                         max="900"
-                        value="${this.selectedDurationSeconds}"
+                        value="${this.selectedDurationSeconds > 0 ? this.selectedDurationSeconds : 300}"
                         aria-label="Duração personalizada em segundos"
                       />
                       <span class="backtrack-custom-unit">segundos</span>
@@ -1152,6 +1166,12 @@ export class BacktrackWidget {
 
       this.shadow.getElementById('btn-duration-300')?.addEventListener('click', () => {
         this.selectedDurationSeconds = 300;
+        this.isCustomDuration = false;
+        this.render();
+      });
+
+      this.shadow.getElementById('btn-duration-all')?.addEventListener('click', () => {
+        this.selectedDurationSeconds = 0;
         this.isCustomDuration = false;
         this.render();
       });

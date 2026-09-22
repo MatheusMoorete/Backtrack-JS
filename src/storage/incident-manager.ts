@@ -238,7 +238,7 @@ export class IncidentManager {
   ): Promise<string> {
     const incidentId = `inc_manual_${this.sessionId}_${now}`;
     const chunks = await this.db.getChunksBySession(this.sessionId);
-    chunks.sort((a, b) => a.sequence - b.sequence);
+    chunks.sort((a, b) => (a.startedAt !== b.startedAt ? a.startedAt - b.startedAt : a.sequence - b.sequence));
 
     const sessionStartedAt = chunks.length > 0 ? chunks[0].startedAt : now;
     let selectedChunks = chunks;
@@ -374,7 +374,7 @@ export class IncidentManager {
     }
 
     const chunks = await this.db.getChunksByIds(incident.chunkIds);
-    chunks.sort((a, b) => a.sequence - b.sequence);
+    chunks.sort((a, b) => (a.startedAt !== b.startedAt ? a.startedAt - b.startedAt : a.sequence - b.sequence));
 
     const mergedTimeline = chunks.flatMap((c) => c.timeline || []);
     const sortedTimeline = sortTimelineEvents(mergedTimeline);

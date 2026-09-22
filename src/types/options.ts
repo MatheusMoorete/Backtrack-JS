@@ -25,6 +25,7 @@ export interface WidgetOptions {
   position?: 'bottom-left' | 'bottom-right' | 'top-left' | 'top-right';
   defaultViewerUrl?: string;
   zIndex?: number;
+  defaultDurationSeconds?: number;
 }
 
 export interface FlightRecorderOptions {
