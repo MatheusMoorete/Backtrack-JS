@@ -383,15 +383,49 @@ describe('Lote 1 — IncidentManager e Exportação', () => {
       expect(sliced[0].data).toEqual({ d: 'mutation early' });
     });
 
-    it('preserva eventos quando a janela já possui FullSnapshot no início', () => {
+    it('preserva mutações ocorridas no mesmo milissegundo após o snapshot base', () => {
       const events = [
-        { type: 2, data: { node: 'root' }, timestamp: 60050 },
-        { type: 3, data: { d: 'mut' }, timestamp: 61000 }
+        { type: 4, data: { width: 1920, height: 1080 }, timestamp: 1000 },
+        { type: 2, data: { node: 'root' }, timestamp: 1000 },
+        // Mutação no mesmo milissegundo (1000) mas posterior na sequência
+        { type: 3, data: { d: 'mutation same ms' }, timestamp: 1000 },
+        { type: 3, data: { d: 'mutation window' }, timestamp: 2000 }
       ];
 
-      const sliced = sliceReplayEventsForWindow(events, 60000, 70000);
-      expect(sliced.length).toBe(2);
-      expect(sliced[0].timestamp).toBe(60050);
+      // Janela de 2000 a 3000
+      const sliced = sliceReplayEventsForWindow(events, 2000, 3000);
+
+      // Deve conter Meta (1999), Snapshot (2000), Mutação same ms (2000) e Mutação window (2000)
+      expect(sliced.length).toBe(4);
+      expect(sliced[0].type).toBe(4);
+      expect(sliced[0].timestamp).toBe(1999);
+      expect(sliced[1].type).toBe(2);
+      expect(sliced[1].timestamp).toBe(2000);
+      expect(sliced[2].data).toEqual({ d: 'mutation same ms' });
+      expect(sliced[2].timestamp).toBe(2000);
+      expect(sliced[3].data).toEqual({ d: 'mutation window' });
+      expect(sliced[3].timestamp).toBe(2000);
+    });
+
+    it('preserva evento Meta e base snapshot mesmo quando o snapshot da janela está após o início', () => {
+      const events = [
+        { type: 4, data: { width: 1920, height: 1080 }, timestamp: 1000 },
+        { type: 2, data: { node: 'root 1' }, timestamp: 1000 },
+        { type: 3, data: { d: 'mut 1' }, timestamp: 1500 },
+        { type: 2, data: { node: 'root 2' }, timestamp: 2500 }
+      ];
+
+      // Janela de 2000 a 3000: há um snapshot em 2500, mas o início em 2000 precisa da base de 1000
+      const sliced = sliceReplayEventsForWindow(events, 2000, 3000);
+
+      // Deve ter Meta (1999), Snapshot 1 (2000), mut 1 (2000) e Snapshot 2 (2500)
+      expect(sliced.length).toBe(4);
+      expect(sliced[0].type).toBe(4);
+      expect(sliced[1].type).toBe(2);
+      expect(sliced[1].data).toEqual({ node: 'root 1' });
+      expect(sliced[2].data).toEqual({ d: 'mut 1' });
+      expect(sliced[3].type).toBe(2);
+      expect(sliced[3].data).toEqual({ node: 'root 2' });
     });
   });
 });

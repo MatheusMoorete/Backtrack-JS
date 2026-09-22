@@ -38,41 +38,43 @@ export function sliceReplayEventsForWindow(
     (e) => e.timestamp >= startedAt && e.timestamp <= finalizedAt
   );
 
-  // Verifica se a janela já possui um FullSnapshot logo no início (primeiros 1000ms)
-  const hasEarlySnapshot = inWindow.some(
-    (e) => e.type === 2 && e.timestamp - startedAt <= 1000
-  );
-
-  if (hasEarlySnapshot) {
-    return inWindow;
-  }
-
   // Busca o FullSnapshot (type: 2) mais recente anterior ou igual a startedAt.
   // NÃO busca snapshots futuros (evita que tela futura apareça no início da gravação).
   const priorSnapshots = sorted.filter((e) => e.type === 2 && e.timestamp <= startedAt);
   const baseSnapshot = priorSnapshots.length > 0 ? priorSnapshots[priorSnapshots.length - 1] : null;
 
   if (!baseSnapshot) {
-    // Se não encontrou snapshot anterior, retorna os eventos da janela
+    // Se não encontrou snapshot anterior ou em startedAt, busca ao menos o Meta (type: 4) anterior
+    // caso a janela não possua nenhum evento Meta para dimensões de tela
+    if (!inWindow.some((e) => e.type === 4)) {
+      const firstMeta = sorted.find((e) => e.type === 4);
+      if (firstMeta) {
+        return [{ ...firstMeta, timestamp: startedAt - 1 }, ...inWindow];
+      }
+    }
     return inWindow;
   }
 
+  // Índice do snapshot base no array ordenado
+  const baseSnapshotIndex = sorted.lastIndexOf(baseSnapshot);
+
   // Busca o evento Meta (type: 4) mais recente anterior ou junto do snapshot
   const priorMetas = sorted.filter(
-    (e) => e.type === 4 && e.timestamp <= baseSnapshot.timestamp
+    (e, idx) => e.type === 4 && idx <= baseSnapshotIndex
   );
   const baseMeta = priorMetas.length > 0 ? priorMetas[priorMetas.length - 1] : null;
 
-  // Busca as mutações ocorridas entre o snapshot base e o início da janela (startedAt).
-  // Essas alterações são fundamentais para que o DOM esteja reconstruído no estado real
-  // do momento startedAt, evitando perda de nós criados nesse intervalo.
-  const intermediateMutations = sorted.filter(
-    (e) =>
-      e.timestamp > baseSnapshot.timestamp &&
-      e.timestamp < startedAt &&
-      e.type !== 2 &&
-      e.type !== 4
-  );
+  // Busca as mutações ocorridas APÓS o snapshot base na sequência e antes de startedAt.
+  // Utiliza a posição no array (idx > baseSnapshotIndex) em vez de apenas timestamp >,
+  // garantindo que mutações ocorridas no mesmo milissegundo do snapshot sejam preservadas!
+  const intermediateMutations = sorted
+    .slice(baseSnapshotIndex + 1)
+    .filter(
+      (e) =>
+        e.timestamp < startedAt &&
+        e.type !== 2 &&
+        e.type !== 4
+    );
 
   const result: RrwebEvent[] = [];
 
@@ -100,6 +102,9 @@ export function sliceReplayEventsForWindow(
   // Eventos incrementais ocorridos dentro da janela
   for (const ev of inWindow) {
     if (ev.type === 2 && ev.timestamp === baseSnapshot.timestamp) {
+      continue;
+    }
+    if (baseMeta && ev.type === 4 && ev.timestamp === baseMeta.timestamp) {
       continue;
     }
     result.push(ev);
@@ -270,22 +275,25 @@ export class IncidentManager {
       const candidateChunks = chunks.filter((c) => (c.endedAt || c.startedAt) >= cutoff);
 
       if (candidateChunks.length > 0) {
-        // Verifica se os candidatos possuem FullSnapshot do rrweb (type: 2)
-        const hasFullSnapshot = candidateChunks.some((c) =>
-          c.hasFullSnapshot ?? c.replay?.some((r) => r.type === 2)
-        );
+        // Verifica se os candidatos já possuem FullSnapshot do rrweb (type: 2) em <= cutoff.
+        // Se todos os snapshots nos candidatos ocorreram APÓS cutoff (ex: aos 15s quando cutoff é 10s),
+        // o período [cutoff, 15s] ficaria sem snapshot base para reconstrução da tela.
+        const hasSnapshotAtOrBeforeCutoff = candidateChunks.some((c) => {
+          if (c.startedAt > cutoff) return false;
+          return c.hasFullSnapshot ?? c.replay?.some((r) => r.type === 2 && r.timestamp <= cutoff);
+        });
 
-        if (!hasFullSnapshot) {
-          // Busca o chunk anterior mais próximo que contém o snapshot inicial
+        if (!hasSnapshotAtOrBeforeCutoff) {
+          // Busca o chunk anterior mais próximo com startedAt <= cutoff que contém o snapshot base
           const priorChunkWithSnapshot = [...chunks]
             .reverse()
             .find(
               (c) =>
-                c.startedAt < candidateChunks[0].startedAt &&
+                c.startedAt <= cutoff &&
                 (c.hasFullSnapshot ?? c.replay?.some((r) => r.type === 2))
             );
 
-          if (priorChunkWithSnapshot) {
+          if (priorChunkWithSnapshot && !candidateChunks.some((c) => c.id === priorChunkWithSnapshot.id)) {
             candidateChunks.unshift(priorChunkWithSnapshot);
           }
         }
