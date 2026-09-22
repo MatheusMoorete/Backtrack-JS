@@ -5,7 +5,7 @@ import type {
   IncidentTrigger,
   IncidentSummary
 } from '../types/incident';
-import type { RrwebEvent } from '../types/chunk';
+import type { RrwebEvent, StoredChunk } from '../types/chunk';
 import type { FlightRecorderArtifactV1, EnvironmentMetadata } from '../types/artifact';
 import { sortTimelineEvents } from '../validation/validate';
 import { decompressGzip } from '../utils/compression';
@@ -253,6 +253,31 @@ export class IncidentManager {
     return existing.id;
   }
 
+  /**
+   * Obtém os timestamps reais de todos os FullSnapshots (rrweb type: 2) de um chunk.
+   */
+  private async getChunkSnapshotTimestamps(chunk: StoredChunk): Promise<number[]> {
+    if (chunk.snapshotTimestamps && chunk.snapshotTimestamps.length > 0) {
+      return chunk.snapshotTimestamps;
+    }
+    if (chunk.replay && chunk.replay.length > 0) {
+      return chunk.replay.filter((r) => r.type === 2).map((r) => r.timestamp);
+    }
+    if (chunk.replayCompressed && chunk.replayCompressed.length > 0) {
+      try {
+        const text = await decompressGzip(chunk.replayCompressed);
+        const events = JSON.parse(text) as RrwebEvent[];
+        return events.filter((r) => r.type === 2).map((r) => r.timestamp);
+      } catch {
+        return [];
+      }
+    }
+    if (chunk.hasFullSnapshot) {
+      return [chunk.startedAt];
+    }
+    return [];
+  }
+
   private async createAndFinalizeManualIncident(
     triggerData: IncidentTrigger,
     now: number,
@@ -271,48 +296,50 @@ export class IncidentManager {
       const cutoff = Math.max(sessionStartedAt, now - windowMs);
       startedAt = cutoff;
 
-      // Chunks que intersectam a janela [cutoff, now]
-      const candidateChunks = chunks.filter((c) => (c.endedAt || c.startedAt) >= cutoff);
+      // Obtém os timestamps reais de FullSnapshot de cada chunk
+      const chunkSnapshots = await Promise.all(
+        chunks.map((c) => this.getChunkSnapshotTimestamps(c))
+      );
 
-      if (candidateChunks.length > 0) {
-        // Verifica se os candidatos já possuem FullSnapshot do rrweb (type: 2) em <= cutoff.
-        // Se todos os snapshots nos candidatos ocorreram APÓS cutoff (ex: aos 15s quando cutoff é 10s),
-        // o período [cutoff, 15s] ficaria sem snapshot base para reconstrução da tela.
-        const hasSnapshotAtOrBeforeCutoff = candidateChunks.some((c) => {
-          if (c.startedAt > cutoff) return false;
-          return c.hasFullSnapshot ?? c.replay?.some((r) => r.type === 2 && r.timestamp <= cutoff);
-        });
+      // Chunks que intersectam a janela solicitada [cutoff, now]
+      const candidateIndices: number[] = [];
+      for (let i = 0; i < chunks.length; i++) {
+        const c = chunks[i];
+        if ((c.endedAt || c.startedAt) >= cutoff) {
+          candidateIndices.push(i);
+        }
+      }
 
-        if (!hasSnapshotAtOrBeforeCutoff) {
-          // Busca o chunk anterior mais próximo com startedAt <= cutoff que contém o snapshot base
-          const priorChunkWithSnapshot = [...chunks]
-            .reverse()
-            .find(
-              (c) =>
-                c.startedAt <= cutoff &&
-                (c.hasFullSnapshot ?? c.replay?.some((r) => r.type === 2))
-            );
+      if (candidateIndices.length > 0) {
+        const firstCandidateIdx = candidateIndices[0];
+        const lastCandidateIdx = candidateIndices[candidateIndices.length - 1];
 
-          if (priorChunkWithSnapshot && !candidateChunks.some((c) => c.id === priorChunkWithSnapshot.id)) {
-            candidateChunks.unshift(priorChunkWithSnapshot);
+        // Localiza o chunk com o snapshot efetivamente anterior ou igual ao corte (<= cutoff)
+        let baseChunkIdx = -1;
+        for (let i = chunks.length - 1; i >= 0; i--) {
+          const hasSnapshotBeforeCutoff = chunkSnapshots[i].some((ts) => ts <= cutoff);
+          if (hasSnapshotBeforeCutoff) {
+            baseChunkIdx = i;
+            break;
           }
         }
-        selectedChunks = candidateChunks;
+
+        // Se encontrou o chunk base com snapshot <= cutoff, inclui todos os lotes entre ele e a janela
+        // (inclusive intermediários com mutações necessárias para reconstituir a tela)
+        const startIdx = baseChunkIdx !== -1 ? Math.min(baseChunkIdx, firstCandidateIdx) : firstCandidateIdx;
+        selectedChunks = chunks.slice(startIdx, lastCandidateIdx + 1);
       } else if (chunks.length > 0) {
         // Fallback se nenhum chunk intersecta a janela (ex: usuário inativo)
-        const lastChunk = chunks[chunks.length - 1];
-        const hasSnapshot = lastChunk.hasFullSnapshot ?? lastChunk.replay?.some((r) => r.type === 2);
-        if (hasSnapshot) {
-          selectedChunks = [lastChunk];
-        } else {
-          const priorChunkWithSnapshot = [...chunks]
-            .reverse()
-            .find((c) => c.hasFullSnapshot ?? c.replay?.some((r) => r.type === 2));
-          selectedChunks =
-            priorChunkWithSnapshot && priorChunkWithSnapshot.id !== lastChunk.id
-              ? [priorChunkWithSnapshot, lastChunk]
-              : [lastChunk];
+        const lastChunkIdx = chunks.length - 1;
+        let baseChunkIdx = -1;
+        for (let i = chunks.length - 1; i >= 0; i--) {
+          if (chunkSnapshots[i].length > 0) {
+            baseChunkIdx = i;
+            break;
+          }
         }
+        const startIdx = baseChunkIdx !== -1 ? baseChunkIdx : lastChunkIdx;
+        selectedChunks = chunks.slice(startIdx, lastChunkIdx + 1);
       }
     }
 

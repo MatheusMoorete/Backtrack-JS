@@ -132,9 +132,14 @@ export class BatchWriter {
     const serialized = JSON.stringify(this.currentChunk);
     this.currentChunk.sizeBytes = serialized.length;
 
+    const snapshotTimestamps = this.currentChunk.replay
+      .filter((r) => r.type === 2)
+      .map((r) => r.timestamp);
+
     const chunkCopy: StoredChunk = {
       ...this.currentChunk,
-      hasFullSnapshot: this.currentChunk.replay.some((r) => r.type === 2),
+      hasFullSnapshot: snapshotTimestamps.length > 0,
+      snapshotTimestamps,
       timeline: [...this.currentChunk.timeline],
       replay: [...this.currentChunk.replay]
     };

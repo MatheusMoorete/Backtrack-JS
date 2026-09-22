@@ -24,5 +24,6 @@ export interface StoredChunk {
   replay: RrwebEvent[];
   replayCompressed?: Uint8Array;
   hasFullSnapshot?: boolean;
+  snapshotTimestamps?: number[];
   timeline: TimelineEvent[];
 }

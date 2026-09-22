@@ -211,6 +211,99 @@ describe('Lote 1 — IncidentManager e Exportação', () => {
     manager.destroy();
   });
 
+  it('captura manual com janela começando em 10s inclui lote anterior com snapshot e intermediários quando novo snapshot está aos 15s', async () => {
+    const manager = new IncidentManager(db, 'sess_gap', 'tab_gap', mockEnv);
+    const now = 20000;
+    const windowSeconds = 10; // cutoff = 10000
+
+    const chunk0: StoredChunk = {
+      id: 'chk_0',
+      sessionId: 'sess_gap',
+      tabId: 'tab_gap',
+      sequence: 1,
+      startedAt: 0,
+      endedAt: 5000,
+      sizeBytes: 100,
+      hasFullSnapshot: true,
+      replay: [
+        { type: 4, data: { width: 1920, height: 1080 }, timestamp: 500 },
+        { type: 2, data: { node: 'root_initial' }, timestamp: 1000 }
+      ],
+      timeline: []
+    };
+
+    const chunk1: StoredChunk = {
+      id: 'chk_1',
+      sessionId: 'sess_gap',
+      tabId: 'tab_gap',
+      sequence: 2,
+      startedAt: 5000,
+      endedAt: 8000,
+      sizeBytes: 100,
+      hasFullSnapshot: false,
+      replay: [{ type: 3, data: { d: 'intermediate_mutation' }, timestamp: 6000 }],
+      timeline: []
+    };
+
+    const chunk2: StoredChunk = {
+      id: 'chk_2',
+      sessionId: 'sess_gap',
+      tabId: 'tab_gap',
+      sequence: 3,
+      startedAt: 8000,
+      endedAt: 20000,
+      sizeBytes: 100,
+      hasFullSnapshot: true,
+      replay: [
+        { type: 2, data: { node: 'root_at_15s' }, timestamp: 15000 },
+        { type: 3, data: { d: 'late_mutation' }, timestamp: 18000 }
+      ],
+      timeline: []
+    };
+
+    await db.putChunk(chunk0);
+    await db.putChunk(chunk1);
+    await db.putChunk(chunk2);
+
+    const incidentId = await manager.trigger(
+      'manual',
+      {
+        id: 'trig_gap',
+        timestamp: now,
+        type: 'manual',
+        signature: 'manual'
+      },
+      windowSeconds
+    );
+
+    const stored = await db.getIncident(incidentId);
+    expect(stored).not.toBeNull();
+    // Garante que chk_0 (base snapshot) e chk_1 (mutações intermediárias) foram incluídos junto com chk_2
+    expect(stored?.chunkIds).toEqual(['chk_0', 'chk_1', 'chk_2']);
+
+    const artifact = await manager.exportArtifact(incidentId);
+    expect(artifact.incident.startedAt).toBe(10000);
+
+    // Meta (9999), Snapshot base de chk_0 (10000), Mutação de chk_1 (10000), Novo snapshot aos 15s (15000), Mutação aos 18s (18000)
+    expect(artifact.replay.length).toBe(5);
+    expect(artifact.replay[0].type).toBe(4);
+    expect(artifact.replay[0].timestamp).toBe(9999);
+    expect(artifact.replay[1].type).toBe(2);
+    expect(artifact.replay[1].timestamp).toBe(10000);
+    expect(artifact.replay[1].data).toEqual({ node: 'root_initial' });
+    expect(artifact.replay[2].type).toBe(3);
+    expect(artifact.replay[2].timestamp).toBe(10000);
+    expect(artifact.replay[2].data).toEqual({ d: 'intermediate_mutation' });
+    expect(artifact.replay[3].type).toBe(2);
+    expect(artifact.replay[3].timestamp).toBe(15000);
+    expect(artifact.replay[3].data).toEqual({ node: 'root_at_15s' });
+    expect(artifact.replay[4].type).toBe(3);
+    expect(artifact.replay[4].timestamp).toBe(18000);
+    expect(artifact.replay[4].data).toEqual({ d: 'late_mutation' });
+
+    manager.destroy();
+  });
+
   it('captura manual de 5 minutos em sessão longa (69 min) restringe startedAt para exatamente 5 minutos', async () => {
     const manager = new IncidentManager(db, 'sess_long', 'tab_long', mockEnv);
     const now = 69 * 60 * 1000 + 41 * 1000; // 69m 41s
