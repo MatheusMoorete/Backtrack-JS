@@ -56,7 +56,10 @@ export interface FlightRecorder {
   captureException(error: unknown, context?: ErrorContext): void;
   listIncidents(): Promise<IncidentSummary[]>;
   getArtifact(incidentId: string): Promise<FlightRecorderArtifactV1>;
-  exportIncident(incidentId: string, options?: { compress?: boolean }): Promise<FlightRecorderArtifactV1>;
+  exportIncident(
+    incidentId: string,
+    options?: { compress?: boolean; aiOptimized?: boolean }
+  ): Promise<FlightRecorderArtifactV1>;
   deleteIncident(incidentId: string): Promise<void>;
   clear(): Promise<void>;
   getHealth(): RecorderHealth;

@@ -113,7 +113,7 @@ describe('Backtrack v0.2.0 — Novas Features', () => {
       };
 
       const md = formatIncidentMarkdown(mockArtifact);
-      expect(md).toContain('### 🚨 Relatório de Incidente — Backtrack');
+      expect(md).toContain('### Relatório de Debug — Backtrack');
       expect(md).toContain('inc_test_999');
       expect(md).toContain('https://uticket.com.br/checkout/payment');
       expect(md).toContain('TypeError: Cannot read properties of undefined');
@@ -125,6 +125,20 @@ describe('Backtrack v0.2.0 — Novas Features', () => {
         replayUrl: 'http://localhost:5173/?gist=abc123gist'
       });
       expect(mdWithReplay).toContain('- **Replay do Incidente:** [Assistir Gravação](http://localhost:5173/?gist=abc123gist)');
+    });
+
+    it('exporta incidente otimizado para IA (.ai.json) mantendo timeline e ambiente', async () => {
+      const recorder = new FlightRecorderImpl({}, db);
+      await recorder.start();
+      const incId = await recorder.capture('Teste IA');
+
+      const artifact = await recorder.exportIncident(incId, { aiOptimized: true });
+      expect(artifact).toBeDefined();
+      expect(artifact.incident.id).toBe(incId);
+      expect(artifact.incident.reason).toBe('manual');
+      expect(Array.isArray(artifact.timeline)).toBe(true);
+
+      recorder.stop();
     });
   });
 

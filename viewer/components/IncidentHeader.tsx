@@ -36,7 +36,7 @@ export const IncidentHeader: React.FC<IncidentHeaderProps> = ({ artifact, onRese
   const [shareTokenInput, setShareTokenInput] = useState('');
   const [showShareTokenPrompt, setShowShareTokenPrompt] = useState(false);
   const [downloadSuccess, setDownloadSuccess] = useState(false);
-  const [downloadFormat, setDownloadFormat] = useState<'gzip' | 'uncompressed' | null>(null);
+  const [downloadFormat, setDownloadFormat] = useState<'gzip' | 'uncompressed' | 'ai' | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [includeLink, setIncludeLink] = useState(true);
   const [isExporting, setIsExporting] = useState(false);
@@ -227,7 +227,20 @@ export const IncidentHeader: React.FC<IncidentHeaderProps> = ({ artifact, onRese
     setDownloadError(null);
 
     try {
-      if (downloadFormat === 'gzip') {
+      if (downloadFormat === 'ai') {
+        const aiPayload = {
+          ...artifact,
+          replay: [],
+          _aiNote: 'Replay visual removido para otimizacao de IA (tamanho < 100 KB). Timeline, erros de console e rede preservados.'
+        };
+        const blob = new Blob([JSON.stringify(aiPayload, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${incident.id}.ai.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } else if (downloadFormat === 'gzip') {
         try {
           const compressed = await compressArtifact(artifact);
           const blob = new Blob([compressed as unknown as BlobPart], { type: 'application/gzip' });
@@ -312,14 +325,14 @@ export const IncidentHeader: React.FC<IncidentHeaderProps> = ({ artifact, onRese
             type="button"
             className="btn-secondary"
             onClick={handleOpenJiraModal}
-            title="Copiar relatório formatado para Jira/GitHub"
+            title="Copiar Markdown para debug (ideal para IAs, Jira ou GitHub)"
             style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
               <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
             </svg>
-            <span>{mdCopied ? '✓ Copiado p/ Jira' : 'Jira / GitHub'}</span>
+            <span>{mdCopied ? 'Copiado!' : 'Markdown para debug'}</span>
           </button>
           <button
             type="button"
@@ -391,7 +404,7 @@ export const IncidentHeader: React.FC<IncidentHeaderProps> = ({ artifact, onRese
                   <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
                   <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
                 </svg>
-                <span>Exportar para Jira / GitHub</span>
+                <span>Markdown para debug</span>
               </div>
               <button
                 type="button"
@@ -413,9 +426,9 @@ export const IncidentHeader: React.FC<IncidentHeaderProps> = ({ artifact, onRese
                   style={{ marginTop: '2px', width: '16px', height: '16px', accentColor: '#2563eb', cursor: 'pointer' }}
                 />
                 <div>
-                  <div style={{ color: '#f1f5f9', fontSize: '13.5px', fontWeight: 500 }}>Adicionar link do incidente?</div>
+                  <div style={{ color: '#f1f5f9', fontSize: '13.5px', fontWeight: 500 }}>Adicionar link do replay interativo?</div>
                   <div style={{ color: '#94a3b8', fontSize: '12px', marginTop: '3px', lineHeight: '1.4' }}>
-                    Gera e inclui um link do replay online (via GitHub Gist) no resumo Markdown para que qualquer pessoa da equipe possa reproduzir e investigar a sessão diretamente pela issue.
+                    Gera e inclui um link do replay online (via GitHub Gist) no relatorio para que qualquer pessoa da equipe ou IAs possam consultar a sessao diretamente.
                   </div>
                 </div>
               </label>
@@ -444,7 +457,7 @@ export const IncidentHeader: React.FC<IncidentHeaderProps> = ({ artifact, onRese
                 disabled={isExporting}
                 style={{ background: '#2563eb', borderColor: '#3b82f6', color: '#ffffff', fontWeight: 500, padding: '6px 14px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}
               >
-                {isExporting ? 'Criando link do Gist...' : 'Copiar Markdown'}
+                {isExporting ? 'Criando link do Gist...' : 'Copiar Markdown para debug'}
               </button>
             </div>
           </div>
@@ -620,6 +633,44 @@ export const IncidentHeader: React.FC<IncidentHeaderProps> = ({ artifact, onRese
                       alignItems: 'flex-start',
                       gap: '10px',
                       padding: '10px 12px',
+                      border: downloadFormat === 'ai' ? '1px solid #2563eb' : '1px solid #334155',
+                      borderRadius: '6px',
+                      background: downloadFormat === 'ai' ? 'rgba(37, 99, 235, 0.1)' : '#0f172a',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                    onClick={() => {
+                      setDownloadFormat('ai');
+                      setDownloadError(null);
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="viewer-download-format"
+                      value="ai"
+                      checked={downloadFormat === 'ai'}
+                      onChange={() => {
+                        setDownloadFormat('ai');
+                        setDownloadError(null);
+                      }}
+                      style={{ marginTop: '2px', cursor: 'pointer', accentColor: '#2563eb' }}
+                    />
+                    <div>
+                      <span style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#f1f5f9' }}>
+                        JSON Otimizado para IA (.ai.json) — Leve (&lt; 100 KB)
+                      </span>
+                      <p style={{ margin: '3px 0 0 0', fontSize: '11px', color: '#94a3b8', lineHeight: 1.35 }}>
+                        Sem gravacao visual pesada. Preserva linha do tempo, console, rede e erros completos. Ideal para Gemini e Claude.
+                      </p>
+                    </div>
+                  </label>
+
+                  <label
+                    style={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: '10px',
+                      padding: '10px 12px',
                       border: downloadFormat === 'gzip' ? '1px solid #2563eb' : '1px solid #334155',
                       borderRadius: '6px',
                       background: downloadFormat === 'gzip' ? 'rgba(37, 99, 235, 0.1)' : '#0f172a',
@@ -708,7 +759,7 @@ export const IncidentHeader: React.FC<IncidentHeaderProps> = ({ artifact, onRese
                     <polyline points="7 10 12 15 17 10" />
                     <line x1="12" y1="15" x2="12" y2="3" />
                   </svg>
-                  <span>{downloadSuccess ? '✓ Download Iniciado!' : 'Baixar Arquivo'}</span>
+                  <span>{downloadSuccess ? 'Download Iniciado!' : 'Baixar Arquivo'}</span>
                 </button>
               </div>
             </div>

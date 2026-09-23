@@ -494,7 +494,7 @@ export class FlightRecorderImpl implements FlightRecorder {
 
   public async exportIncident(
     incidentId: string,
-    options?: { compress?: boolean }
+    options?: { compress?: boolean; aiOptimized?: boolean }
   ): Promise<FlightRecorderArtifactV1> {
     const artifact = await this.getArtifact(incidentId);
 
@@ -502,8 +502,9 @@ export class FlightRecorderImpl implements FlightRecorder {
       .toISOString()
       .replace(/:/g, '-')
       .replace(/\..+/, '');
-    const isCompressed = options?.compress ?? false;
-    const ext = isCompressed ? '.ffr.json.gz' : '.ffr.json';
+    const isAi = options?.aiOptimized ?? false;
+    const isCompressed = !isAi && (options?.compress ?? false);
+    const ext = isAi ? '.ai.json' : isCompressed ? '.ffr.json.gz' : '.ffr.json';
     const filename = `flight-recorder-${dateStr}-${artifact.incident.reason}-${incidentId}${ext}`;
 
     if (typeof window !== 'undefined' && typeof document !== 'undefined') {
@@ -511,6 +512,14 @@ export class FlightRecorderImpl implements FlightRecorder {
       if (isCompressed) {
         const compressed = await compressArtifact(artifact);
         blob = new Blob([compressed as unknown as BlobPart], { type: 'application/gzip' });
+      } else if (isAi) {
+        const aiPayload = {
+          ...artifact,
+          replay: [],
+          _aiNote: 'Replay visual removido para otimizacao de IA (tamanho < 100 KB). Timeline, erros de console e rede preservados.'
+        };
+        const jsonStr = JSON.stringify(aiPayload, null, 2);
+        blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8' });
       } else {
         const jsonStr = JSON.stringify(artifact, null, 2);
         blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8' });

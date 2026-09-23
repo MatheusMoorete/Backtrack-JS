@@ -31,7 +31,7 @@ export class BacktrackWidget {
   private exportModalError: string | null = null;
 
   private downloadModalIncidentId: string | null = null;
-  private downloadModalFormat: 'gzip' | 'uncompressed' | null = null;
+  private downloadModalFormat: 'gzip' | 'uncompressed' | 'ai' | null = null;
   private isDownloading = false;
   private downloadModalError: string | null = null;
 
@@ -334,9 +334,12 @@ export class BacktrackWidget {
     this.render();
 
     try {
+      const isAi = this.downloadModalFormat === 'ai';
       const compress = this.downloadModalFormat === 'gzip';
-      await this.recorder.exportIncident(id, { compress });
-      this.alertMessage = compress
+      await this.recorder.exportIncident(id, { compress, aiOptimized: isAi });
+      this.alertMessage = isAi
+        ? 'Download do JSON para IA (.ai.json) iniciado!'
+        : compress
         ? 'Download do arquivo compactado (.ffr.json.gz) iniciado!'
         : 'Download do arquivo (.ffr.json) iniciado!';
       this.closeDownloadModal();
@@ -422,8 +425,8 @@ export class BacktrackWidget {
       if (typeof navigator !== 'undefined' && navigator.clipboard) {
         await navigator.clipboard.writeText(md);
         this.alertMessage = this.exportModalIncludeLink
-          ? 'Resumo Markdown copiado com link do replay!'
-          : 'Resumo Markdown copiado para o Jira/GitHub!';
+          ? 'Markdown para debug copiado com link do replay!'
+          : 'Markdown para debug copiado!';
       } else {
         this.alertMessage = 'Área de transferência indisponível.';
       }
@@ -915,7 +918,7 @@ export class BacktrackWidget {
                     <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
                     <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
                   </svg>
-                  <span>Copiar Markdown (Jira / GitHub)</span>
+                  <span>Markdown para debug</span>
                 </button>
                 <div class="backtrack-dropdown-divider"></div>
                 <button type="button" class="backtrack-dropdown-item is-danger" data-delete-id="${inc.id}">
@@ -944,7 +947,7 @@ export class BacktrackWidget {
                 <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
                 <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
               </svg>
-              <span>Copiar para Jira / GitHub</span>
+              <span>Markdown para debug</span>
             </div>
             <button type="button" class="backtrack-modal-close" id="btn-close-export-modal" aria-label="Fechar">✕</button>
           </div>
@@ -952,8 +955,8 @@ export class BacktrackWidget {
             <label class="backtrack-modal-checkbox-label">
               <input type="checkbox" id="check-include-incident-link" ${this.exportModalIncludeLink ? 'checked' : ''} ${this.isExportingMarkdown ? 'disabled' : ''} />
               <div>
-                <span class="backtrack-modal-checkbox-title">Adicionar link do incidente?</span>
-                <p class="backtrack-modal-checkbox-desc">Gera e inclui o link público do replay online (GitHub Gist) no resumo Markdown para que a equipe possa inspecionar a sessão diretamente pela issue.</p>
+                <span class="backtrack-modal-checkbox-title">Adicionar link do replay interativo?</span>
+                <p class="backtrack-modal-checkbox-desc">Gera e inclui o link publico do replay online (GitHub Gist) no relatorio para que a equipe ou IAs possam inspecionar a sessao.</p>
               </div>
             </label>
             ${this.exportModalError ? `<div class="backtrack-modal-error">${this.exportModalError}</div>` : ''}
@@ -961,7 +964,7 @@ export class BacktrackWidget {
           <div class="backtrack-modal-footer">
             <button type="button" class="backtrack-btn-secondary" id="btn-cancel-export-modal" ${this.isExportingMarkdown ? 'disabled' : ''}>Cancelar</button>
             <button type="button" class="backtrack-btn-primary" id="btn-confirm-export-modal" ${this.isExportingMarkdown ? 'disabled' : ''}>
-              ${this.isExportingMarkdown ? 'Criando link do Gist...' : 'Copiar Markdown'}
+              ${this.isExportingMarkdown ? 'Criando link do Gist...' : 'Copiar Markdown para debug'}
             </button>
           </div>
         </div>
@@ -985,6 +988,13 @@ export class BacktrackWidget {
             <button type="button" class="backtrack-modal-close" id="btn-close-download-modal" aria-label="Fechar">✕</button>
           </div>
           <div class="backtrack-modal-body">
+            <label class="backtrack-modal-radio-label ${this.downloadModalFormat === 'ai' ? 'is-selected' : ''}">
+              <input type="radio" name="backtrack-download-format" value="ai" id="radio-format-ai" ${this.downloadModalFormat === 'ai' ? 'checked' : ''} ${this.isDownloading ? 'disabled' : ''} />
+              <div>
+                <span class="backtrack-modal-radio-title">JSON Otimizado para IA (.ai.json) — Leve (&lt; 100 KB)</span>
+                <p class="backtrack-modal-radio-desc">Sem gravacao visual pesada. Preserva linha do tempo, console, rede e erros completos. Ideal para Gemini e Claude.</p>
+              </div>
+            </label>
             <label class="backtrack-modal-radio-label ${this.downloadModalFormat === 'gzip' ? 'is-selected' : ''}">
               <input type="radio" name="backtrack-download-format" value="gzip" id="radio-format-gzip" ${this.downloadModalFormat === 'gzip' ? 'checked' : ''} ${this.isDownloading ? 'disabled' : ''} />
               <div>
@@ -1336,6 +1346,11 @@ export class BacktrackWidget {
         });
         this.shadow.getElementById('btn-cancel-download-modal')?.addEventListener('click', () => {
           this.closeDownloadModal();
+        });
+        this.shadow.getElementById('radio-format-ai')?.addEventListener('change', () => {
+          this.downloadModalFormat = 'ai';
+          this.downloadModalError = null;
+          this.render();
         });
         this.shadow.getElementById('radio-format-gzip')?.addEventListener('change', () => {
           this.downloadModalFormat = 'gzip';
