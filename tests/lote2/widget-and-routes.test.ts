@@ -83,16 +83,16 @@ describe('Backtrack v0.1.2 — Widget Nativo e Privacidade por Rota', () => {
       expect(saveBtn?.textContent?.trim()).toBe('Salvar');
       expect(saveBtn?.querySelector('svg')).toBeNull();
 
-      // Botão Anotar (sem emoji de lápis, texto Anotar)
+      // Botão Anotar (ícone com aria-label Anotar)
       const annotateBtn = host?.shadowRoot?.getElementById('btn-annotate');
       expect(annotateBtn).not.toBeNull();
-      expect(annotateBtn?.textContent?.trim()).toBe('Anotar');
+      expect(annotateBtn?.getAttribute('aria-label')).toBe('Anotar na tela');
 
       widget.unmount();
       expect(document.getElementById('__backtrack_widget_host__')).toBeNull();
     });
 
-    it('renderiza card de incidente com botão Visualizar e menu de 3 pontos para opções secundárias', async () => {
+    it('renderiza card de incidente e abre tela de detalhes com ações completas', async () => {
       const recorder = new FlightRecorderImpl({}, db);
       await recorder.start();
       await recorder.capture('Teste incidente');
@@ -107,24 +107,18 @@ describe('Backtrack v0.1.2 — Widget Nativo e Privacidade por Rota', () => {
       // Aguarda atualização dos incidentes
       await new Promise((resolve) => setTimeout(resolve, 50));
 
-      const viewBtn = host?.shadowRoot?.querySelector('.backtrack-btn-view');
+      // Card do incidente na lista
+      const incidentCard = host?.shadowRoot?.querySelector('[data-open-detail-id]') as HTMLElement;
+      expect(incidentCard).not.toBeNull();
+
+      // Clica no card para abrir a tela de detalhes
+      incidentCard?.click();
+
+      const viewBtn = host?.shadowRoot?.querySelector('.backtrack-detail-btn-primary');
       expect(viewBtn).not.toBeNull();
-      expect(viewBtn?.textContent?.trim()).toBe('Visualizar');
+      expect(viewBtn?.textContent?.trim()).toContain('Visualizar Replay');
 
-      // Menu de 3 pontos
-      const menuTrigger = host?.shadowRoot?.querySelector('.backtrack-menu-trigger') as HTMLButtonElement;
-      expect(menuTrigger).not.toBeNull();
-
-      const dropdown = host?.shadowRoot?.querySelector('.backtrack-dropdown-menu');
-      expect(dropdown).not.toBeNull();
-      expect(dropdown?.classList.contains('is-open')).toBe(false);
-
-      // Clica no menu de 3 pontos para abrir
-      menuTrigger?.click();
-      const openDropdown = host?.shadowRoot?.querySelector('.backtrack-dropdown-menu');
-      expect(openDropdown?.classList.contains('is-open')).toBe(true);
-
-      // Itens do menu
+      // Itens de ação da tela de detalhes
       const downloadBtn = host?.shadowRoot?.querySelector('[data-download-id]');
       const copyBtn = host?.shadowRoot?.querySelector('[data-copy-id]');
       const deleteBtn = host?.shadowRoot?.querySelector('[data-delete-id]');
@@ -160,9 +154,6 @@ describe('Backtrack v0.1.2 — Widget Nativo e Privacidade por Rota', () => {
       const cancelDownloadBtn = host?.shadowRoot?.getElementById('btn-cancel-download-modal');
       (cancelDownloadBtn as HTMLButtonElement)?.click();
       expect(host?.shadowRoot?.querySelector('.backtrack-modal-card')).toBeNull();
-
-      // Reabre o menu de 3 pontos
-      (host?.shadowRoot?.querySelector('.backtrack-menu-trigger') as HTMLButtonElement)?.click();
 
       // Clica em Markdown para debug para abrir modal de opções
       const copyBtnReopened = host?.shadowRoot?.querySelector('[data-copy-id]');
@@ -329,9 +320,13 @@ describe('Backtrack v0.1.2 — Widget Nativo e Privacidade por Rota', () => {
       expect(isVisibleAfterToggle).toBe(true);
       expect(host?.style.display).toBe('');
 
-      // Testa botão de ocultar no header do painel
+      // Testa botão de ocultar no header do painel (dentro do menu de mais opções)
       const launcher = host?.shadowRoot?.getElementById('btn-launcher');
       launcher?.click();
+
+      const headerMenuBtn = host?.shadowRoot?.getElementById('btn-header-menu');
+      expect(headerMenuBtn).not.toBeNull();
+      headerMenuBtn?.click();
 
       const btnHide = host?.shadowRoot?.getElementById('btn-hide-widget');
       expect(btnHide).not.toBeNull();
@@ -391,6 +386,11 @@ describe('Backtrack v0.1.2 — Widget Nativo e Privacidade por Rota', () => {
       // Abre drawer
       const host = document.getElementById('__backtrack_widget_host__');
       host?.shadowRoot?.getElementById('btn-launcher')?.click();
+
+      // Clica no card para abrir os detalhes
+      const card = host?.shadowRoot?.querySelector('[data-open-detail-id="test-inc-1"]') as HTMLElement;
+      expect(card).not.toBeNull();
+      card?.click();
 
       const viewBtn = host?.shadowRoot?.querySelector('[data-view-id="test-inc-1"]') as HTMLButtonElement;
       expect(viewBtn).not.toBeNull();

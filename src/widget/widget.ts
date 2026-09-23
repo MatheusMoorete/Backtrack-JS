@@ -1,13 +1,14 @@
-import type { FlightRecorder, WidgetOptions } from '../types/options';
-import type { IncidentSummary } from '../types/incident';
-import type { RecorderHealth } from '../types/health';
+import type { FlightRecorder } from '../types';
 import type { FlightRecorderArtifactV1 } from '../types/artifact';
-import { WIDGET_CSS } from './styles';
-import { ScreenAnnotator } from './annotator';
-import { formatIncidentMarkdown } from '../utils/markdown';
+import type { RecorderHealth } from '../types/health';
+import type { IncidentSummary } from '../types/incident';
+import type { WidgetOptions } from '../types/options';
 import { uploadArtifactToGist } from '../utils/gist-uploader';
+import { formatIncidentMarkdown } from '../utils/markdown';
+import { ScreenAnnotator } from './annotator';
+import { WIDGET_CSS } from './styles';
 
-export const DEFAULT_VIEWER_URL = 'http://localhost:5173';
+const DEFAULT_VIEWER_URL = 'https://backtrack-viewer.pages.dev';
 
 export class BacktrackWidget {
   private recorder: FlightRecorder;
@@ -21,8 +22,9 @@ export class BacktrackWidget {
   private incidents: IncidentSummary[] = [];
   private health: RecorderHealth | null = null;
   private alertMessage: string | null = null;
-  private openMenuId: string | null = null;
   private isCustomDuration = false;
+  private isHeaderMenuOpen = false;
+  private selectedIncidentId: string | null = null;
 
   private exportModalIncidentId: string | null = null;
   private exportModalIncludeLink = true;
@@ -43,26 +45,21 @@ export class BacktrackWidget {
     this.recorder = recorder;
     this.options = {
       position: options?.position ?? 'bottom-left',
-      defaultViewerUrl: options?.defaultViewerUrl ?? DEFAULT_VIEWER_URL,
       zIndex: options?.zIndex ?? 999999,
-      defaultDurationSeconds: options?.defaultDurationSeconds
+      defaultViewerUrl: options?.defaultViewerUrl ?? DEFAULT_VIEWER_URL
     };
-    if (this.options.defaultDurationSeconds !== undefined) {
-      this.selectedDurationSeconds = this.options.defaultDurationSeconds;
-    }
   }
 
   public mount(): void {
-    if (typeof document === 'undefined' || this.container) return;
+    if (this.container || typeof document === 'undefined') return;
 
-    // Cria elemento hospedeiro com Shadow DOM para isolamento total de CSS
     const host = document.createElement('div');
     host.id = '__backtrack_widget_host__';
-    host.className = 'backtrack-ignore backtrack-block rr-ignore rr-block';
+    host.className = 'backtrack-ignore rr-ignore';
     host.setAttribute('data-rr-ignore', 'true');
-    host.setAttribute('data-backtrack-ignore', 'true');
     this.applyHostPosition(host);
 
+    // Respeita preferência do usuário de ocultar
     try {
       if (typeof localStorage !== 'undefined' && localStorage.getItem('backtrack_widget_hidden') === 'true') {
         host.style.display = 'none';
@@ -84,20 +81,26 @@ export class BacktrackWidget {
           this.render();
           return;
         }
-        if (this.downloadModalIncidentId) {
-          e.preventDefault();
-          this.closeDownloadModal();
-          return;
-        }
         if (this.exportModalIncidentId) {
           e.preventDefault();
           this.closeExportModal();
           return;
         }
-        if (this.openMenuId) {
+        if (this.downloadModalIncidentId) {
           e.preventDefault();
-          this.openMenuId = null;
-          this.updateMenuVisibility();
+          this.closeDownloadModal();
+          return;
+        }
+        if (this.isHeaderMenuOpen) {
+          e.preventDefault();
+          this.isHeaderMenuOpen = false;
+          this.render();
+          return;
+        }
+        if (this.selectedIncidentId) {
+          e.preventDefault();
+          this.selectedIncidentId = null;
+          this.render();
           return;
         }
         if (this.isOpen) {
@@ -135,6 +138,7 @@ export class BacktrackWidget {
 
   public hide(): void {
     this.showHideConfirmModal = false;
+    this.isHeaderMenuOpen = false;
     if (this.container) {
       this.container.style.display = 'none';
     }
@@ -239,34 +243,39 @@ export class BacktrackWidget {
 
     try {
       const duration = this.selectedDurationSeconds > 0 ? this.selectedDurationSeconds : undefined;
-      const id = await this.recorder.capture('Captura manual', duration);
-      this.alertMessage = `Incidente ${id.substring(0, 14)}... gravado!`;
+      await this.recorder.capture('manual', duration);
       await this.updateData();
+      this.alertMessage = 'Gravação salva com sucesso!';
     } catch (err) {
-      this.alertMessage = 'Falha ao gravar incidente.';
+      this.alertMessage = 'Falha ao salvar gravação retroativa.';
     } finally {
       this.isCapturing = false;
       this.render();
       setTimeout(() => {
         this.alertMessage = null;
         this.render();
-      }, 4000);
+      }, 3500);
     }
   }
 
   private async handleClear(): Promise<void> {
-    if (!confirm('Deseja limpar todos os dados de gravação e incidentes locais?')) return;
     try {
+      if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
+        if (!window.confirm('Deseja realmente limpar todas as gravações e o buffer da sessão?')) {
+          return;
+        }
+      }
       await this.recorder.clear();
-      this.alertMessage = 'Todos os dados locais foram limpos.';
+      this.selectedIncidentId = null;
       await this.updateData();
-    } catch {
-      this.alertMessage = 'Erro ao limpar dados.';
-    } finally {
+      this.alertMessage = 'Gravações limpas com sucesso.';
+      this.render();
       setTimeout(() => {
         this.alertMessage = null;
         this.render();
       }, 3000);
+    } catch (err) {
+      alert('Falha ao limpar gravações.');
     }
   }
 
@@ -288,7 +297,6 @@ export class BacktrackWidget {
     this.downloadModalFormat = null;
     this.downloadModalError = null;
     this.isDownloading = false;
-    this.openMenuId = null;
     this.render();
   }
 
@@ -352,7 +360,6 @@ export class BacktrackWidget {
     this.exportModalIncludeLink = true;
     this.exportModalError = null;
     this.isExportingMarkdown = false;
-    this.openMenuId = null;
     this.render();
   }
 
@@ -569,6 +576,9 @@ export class BacktrackWidget {
         }
       }
       await this.recorder.deleteIncident(incidentId);
+      if (this.selectedIncidentId === incidentId) {
+        this.selectedIncidentId = null;
+      }
       await this.updateData();
       this.render();
     } catch {
@@ -637,7 +647,8 @@ export class BacktrackWidget {
 
   private toggleOpen(): void {
     this.isOpen = !this.isOpen;
-    this.openMenuId = null;
+    this.isHeaderMenuOpen = false;
+    this.selectedIncidentId = null;
     if (this.isOpen) {
       this.updateData();
       if (!this.pollTimer) {
@@ -657,6 +668,19 @@ export class BacktrackWidget {
     const kb = bytes / 1024;
     if (kb < 1024) return `${kb.toFixed(1)} KB`;
     return `${(kb / 1024).toFixed(1)} MB`;
+  }
+
+  private formatIncidentTitle(reason?: string): string {
+    if (!reason || reason === 'manual') {
+      return 'Sessão manual iniciada';
+    }
+    if (reason === 'unhandled-error') {
+      return 'Erro não tratado na aplicação';
+    }
+    if (reason === 'http-error') {
+      return 'Falha na requisição de rede';
+    }
+    return reason;
   }
 
   private render(): void {
@@ -696,155 +720,211 @@ export class BacktrackWidget {
           this.isOpen
             ? `
           <div class="backtrack-panel" role="dialog" aria-labelledby="backtrack-title">
+            <!-- 1. Header -->
             <div class="backtrack-panel-header">
-              <div>
-                <div class="backtrack-panel-title" id="backtrack-title">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <div class="backtrack-header-left">
+                <div class="backtrack-header-title" id="backtrack-title">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
                     <polyline points="3 3 3 8 8 8" />
-                    <polygon points="10 9 15 12 10 15 10 9" fill="currentColor" stroke="none" />
+                    <polyline points="12 7 12 12 15 15" />
                   </svg>
-                  Backtrack
+                  <span>Backtrack</span>
+                  <span class="backtrack-header-dot"></span>
                 </div>
-                <div class="backtrack-panel-subtitle">
-                  <span class="backtrack-storage-wrap">
-                    <span>${this.formatBytes(this.health?.storageBytes ?? 0)}</span>
-                    ${this.health?.storageLimitExceeded ? '<span style="color: #f59e0b; margin-left: 2px; font-weight: bold; font-size: 11px;" title="Limite excedido por incidentes salvos">[!]</span>' : ''}
+              </div>
+              <div class="backtrack-header-right">
+                <span
+                  class="backtrack-storage-tooltip-trigger"
+                  title="${this.health?.protectedStorageBytes ? `${this.formatBytes(this.health.protectedStorageBytes)} protegidos. ` : ''}Dados protegidos contra a rotação automática de memória no IndexedDB (limite total de 50 MB)."
+                  aria-label="Informações sobre dados protegidos no IndexedDB"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                  </svg>
+                </span>
+                <div class="backtrack-header-menu-wrap">
+                  <button
+                    type="button"
+                    class="backtrack-header-icon-btn"
+                    id="btn-header-menu"
+                    title="Mais opções"
+                    aria-label="Mais opções"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                      <circle cx="12" cy="12" r="2" />
+                      <circle cx="19" cy="12" r="2" />
+                      <circle cx="5" cy="12" r="2" />
+                    </svg>
+                  </button>
+                  ${
+                    this.isHeaderMenuOpen
+                      ? `
+                    <div class="backtrack-header-menu">
+                      <div class="backtrack-header-menu-info">
+                        Armazenamento: ${this.formatBytes(this.health?.storageBytes ?? 0)}
+                      </div>
+                      <button type="button" class="backtrack-header-menu-item" id="btn-hide-widget">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                          <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+                          <line x1="1" y1="1" x2="23" y2="23" />
+                        </svg>
+                        <span>Ocultar Backtrack da tela</span>
+                      </button>
+                    </div>
+                  `
+                      : ''
+                  }
+                </div>
+                <button
+                  type="button"
+                  class="backtrack-header-icon-btn"
+                  id="btn-close"
+                  title="Fechar painel"
+                  aria-label="Fechar painel"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <!-- Body -->
+            <div class="backtrack-panel-body">
+              ${this.alertMessage ? `<div class="backtrack-alert">${this.alertMessage}</div>` : ''}
+
+              ${
+                this.selectedIncidentId
+                  ? this.renderDetailViewHtml()
+                  : `
+                <div class="backtrack-controls-section">
+                  <div class="backtrack-section-label-row">
+                    <div class="backtrack-section-label">Janela de gravação</div>
                     <span
-                      class="backtrack-storage-tooltip-trigger"
-                      title="${this.health?.protectedStorageBytes ? `${this.formatBytes(this.health.protectedStorageBytes)} protegidos. ` : ''}Gravações de incidentes salvos ficam protegidas para não serem apagadas pela reciclagem automática de memória (limite total de 50 MB no IndexedDB)."
-                      aria-label="Informações sobre o armazenamento local e dados protegidos"
+                      class="backtrack-help-tooltip-trigger"
+                      title="Quanto tempo de histórico retroativo será gravado antes do clique (de 5 segundos até 15 minutos)."
                     >
-                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <circle cx="12" cy="12" r="10" />
                         <line x1="12" y1="16" x2="12" y2="12" />
                         <line x1="12" y1="8" x2="12.01" y2="8" />
                       </svg>
+                      <span>O que é?</span>
                     </span>
-                  </span>
-                </div>
-              </div>
-              <div class="backtrack-header-actions">
-                <button
-                  type="button"
-                  class="backtrack-hide-btn"
-                  id="btn-hide-widget"
-                  title="Ocultar ícone da tela (Para reexibir: Ctrl+Shift+B ou execute Backtrack.show() no console)"
-                  aria-label="Ocultar ícone da tela"
-                >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
-                    <line x1="1" y1="1" x2="23" y2="23" />
-                  </svg>
-                </button>
-                <button type="button" class="backtrack-close-btn" id="btn-close" aria-label="Fechar painel">×</button>
-              </div>
-            </div>
-
-            <div class="backtrack-panel-body">
-              ${this.alertMessage ? `<div class="backtrack-alert">${this.alertMessage}</div>` : ''}
-
-              <!-- Duração -->
-              <div class="backtrack-duration-section">
-                <div class="backtrack-section-title-row">
-                  <div class="backtrack-section-title">Janela de Gravação</div>
-                  <span
-                    class="backtrack-help-tooltip-trigger"
-                    title="Quanto tempo de histórico retroativo será gravado antes do clique (de 5 segundos até 15 minutos: 1 min, 5 min, Tudo disponível no buffer ou Custom)."
-                  >
-                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                      <circle cx="12" cy="12" r="10" />
-                      <line x1="12" y1="16" x2="12" y2="12" />
-                      <line x1="12" y1="8" x2="12.01" y2="8" />
-                    </svg>
-                    <span>O que é?</span>
-                  </span>
-                </div>
-                <div class="backtrack-duration-group">
-                  <button
-                    type="button"
-                    class="backtrack-duration-btn ${!this.isCustomDuration && this.selectedDurationSeconds === 60 ? 'is-selected' : ''}"
-                    id="btn-duration-60"
-                  >
-                    1 min
-                  </button>
-                  <button
-                    type="button"
-                    class="backtrack-duration-btn ${!this.isCustomDuration && this.selectedDurationSeconds === 300 ? 'is-selected' : ''}"
-                    id="btn-duration-300"
-                  >
-                    5 min
-                  </button>
-                  <button
-                    type="button"
-                    class="backtrack-duration-btn ${!this.isCustomDuration && this.selectedDurationSeconds === 0 ? 'is-selected' : ''}"
-                    id="btn-duration-all"
-                    title="Grava todo o histórico da sessão disponível no buffer"
-                  >
-                    Tudo
-                  </button>
-                  <button
-                    type="button"
-                    class="backtrack-duration-btn ${this.isCustomDuration ? 'is-selected' : ''}"
-                    id="btn-duration-custom"
-                  >
-                    Custom
-                  </button>
-                </div>
-                ${
-                  this.isCustomDuration
-                    ? `
-                  <div class="backtrack-custom-duration-row">
-                    <div class="backtrack-custom-input-wrap">
-                      <input
-                        type="number"
-                        class="backtrack-custom-duration-input"
-                        id="input-custom-duration"
-                        min="5"
-                        max="900"
-                        value="${this.selectedDurationSeconds > 0 ? this.selectedDurationSeconds : 300}"
-                        aria-label="Duração personalizada em segundos"
-                      />
-                      <span class="backtrack-custom-unit">segundos</span>
-                    </div>
-                    <span class="backtrack-custom-hint">5s a 900s (15 min)</span>
                   </div>
-                `
-                    : ''
-                }
-              </div>
+                  <div class="backtrack-duration-grid">
+                    <button
+                      type="button"
+                      class="backtrack-duration-btn ${!this.isCustomDuration && this.selectedDurationSeconds === 60 ? 'is-selected' : ''}"
+                      id="btn-duration-60"
+                    >
+                      1 min
+                    </button>
+                    <button
+                      type="button"
+                      class="backtrack-duration-btn ${!this.isCustomDuration && this.selectedDurationSeconds === 300 ? 'is-selected' : ''}"
+                      id="btn-duration-300"
+                    >
+                      5 min
+                    </button>
+                    <button
+                      type="button"
+                      class="backtrack-duration-btn ${!this.isCustomDuration && this.selectedDurationSeconds === 0 ? 'is-selected' : ''}"
+                      id="btn-duration-all"
+                      title="Grava todo o histórico da sessão disponível no buffer"
+                    >
+                      Tudo
+                    </button>
+                    <button
+                      type="button"
+                      class="backtrack-duration-btn ${this.isCustomDuration ? 'is-selected' : ''}"
+                      id="btn-duration-custom"
+                    >
+                      <span>Custom</span>
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M6 9l6 6 6-6"/>
+                      </svg>
+                    </button>
+                  </div>
 
-              <!-- Ações -->
-              <div class="backtrack-actions-row">
-                <button
-                  type="button"
-                  class="backtrack-btn-save"
-                  id="btn-save"
-                  ${this.isCapturing ? 'disabled' : ''}
-                >
-                  ${this.isCapturing ? 'Salvando...' : 'Salvar'}
-                </button>
-                <button
-                  type="button"
-                  class="backtrack-btn-annotate"
-                  id="btn-annotate"
-                  title="Congelar e desenhar na tela antes de gravar"
-                  ${this.isCapturing ? 'disabled' : ''}
-                >
-                  Anotar
-                </button>
-                <button type="button" class="backtrack-btn-clear" id="btn-clear" title="Limpar incidentes e buffer local">
-                  Limpar
-                </button>
-              </div>
+                  ${
+                    this.isCustomDuration
+                      ? `
+                    <div class="backtrack-custom-duration-row">
+                      <div class="backtrack-custom-input-wrap">
+                        <input
+                          type="number"
+                          class="backtrack-custom-duration-input"
+                          id="input-custom-duration"
+                          min="5"
+                          max="900"
+                          value="${this.selectedDurationSeconds > 0 ? this.selectedDurationSeconds : 300}"
+                          aria-label="Duração personalizada em segundos"
+                        />
+                        <span class="backtrack-custom-unit">segundos</span>
+                      </div>
+                      <span class="backtrack-custom-hint">5s a 900s (15 min)</span>
+                    </div>
+                  `
+                      : ''
+                  }
 
-              <!-- Lista de Incidentes -->
-              <div class="backtrack-section-title" id="backtrack-saved-count-title">Gravações Salvas (${incidentCount})</div>
-              <div id="backtrack-incident-list-container">
-                ${this.renderIncidentsHtml()}
-              </div>
+                  <div class="backtrack-actions-row">
+                    <button
+                      type="button"
+                      class="backtrack-btn-save"
+                      id="btn-save"
+                      ${this.isCapturing ? 'disabled' : ''}
+                    >
+                      ${this.isCapturing ? 'Salvando...' : 'Salvar'}
+                    </button>
+                    <button
+                      type="button"
+                      class="backtrack-btn-icon-square"
+                      id="btn-annotate"
+                      title="Anotar na tela"
+                      aria-label="Anotar na tela"
+                      ${this.isCapturing ? 'disabled' : ''}
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M12 19l7-7 3 3-7 7-3-3z" />
+                        <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" />
+                        <path d="M2 2l7.586 7.586" />
+                        <circle cx="11" cy="11" r="2" />
+                      </svg>
+                      <span class="backtrack-sr-only">Anotar</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="backtrack-btn-icon-square"
+                      id="btn-clear"
+                      title="Limpar gravações e buffer local"
+                      aria-label="Limpar gravações e buffer local"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M20 20H7L3 16C2 15 2 13 3 12L13 2L22 11L18 15" />
+                        <path d="M11 4L20 13" />
+                      </svg>
+                      <span class="backtrack-sr-only">Limpar</span>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- 3. Lista de Gravações Salvas -->
+                <div class="backtrack-list-header">
+                  <span class="backtrack-list-title">Gravações salvas</span>
+                  <span class="backtrack-list-count" id="backtrack-saved-count-title">${incidentCount}</span>
+                </div>
+                <div id="backtrack-incident-list-container">
+                  ${this.renderIncidentsHtml()}
+                </div>
+              `
+              }
             </div>
 
+            <!-- Modais -->
             ${this.exportModalIncidentId ? this.renderExportModal() : ''}
             ${this.downloadModalIncidentId ? this.renderDownloadModal() : ''}
             ${this.showHideConfirmModal ? this.renderHideConfirmModal() : ''}
@@ -861,81 +941,117 @@ export class BacktrackWidget {
   private renderIncidentsHtml(): string {
     const incidentCount = this.incidents.length;
     if (incidentCount === 0) {
-      return `<div class="backtrack-empty-state">Nenhum incidente salvo nesta sessão.</div>`;
+      return `
+        <div class="backtrack-empty-container">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="10" />
+            <polyline points="12 6 12 12 16 14" />
+          </svg>
+          <div class="backtrack-empty-title">Nenhuma gravação ainda</div>
+          <div class="backtrack-empty-desc">Clique em Salvar para capturar os últimos 5 minutos</div>
+        </div>
+      `;
     }
 
     return this.incidents
       .slice(0, 8)
       .map((inc) => {
-        const dateStr = new Date(inc.startedAt).toLocaleTimeString('pt-BR');
+        const dateStr = new Date(inc.startedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
         const durationSec = inc.finalizedAt
           ? Math.max(1, Math.round((inc.finalizedAt - inc.startedAt) / 1000))
           : 0;
+        const title = this.formatIncidentTitle(inc.reason);
+
         return `
-        <div class="backtrack-incident-card">
-          <div>
-            <div class="backtrack-incident-header-text">
-              <span>${dateStr}</span>
-              <span class="backtrack-duration-pill">${durationSec}s</span>
+          <div class="backtrack-list-item" data-open-detail-id="${inc.id}" role="button" tabindex="0" aria-label="${title}">
+            <div class="backtrack-item-content">
+              <span class="backtrack-item-title">${title}</span>
+              <span class="backtrack-item-meta">${dateStr} · ${durationSec}s</span>
             </div>
-            <div class="backtrack-incident-sub-id">${inc.id.substring(0, 16)}...</div>
-          </div>
-          <div class="backtrack-incident-actions">
-            <button type="button" class="backtrack-action-btn backtrack-btn-view" data-view-id="${inc.id}" title="Abrir no visualizador offline">
-              Visualizar
-            </button>
-            <div class="backtrack-menu-wrapper">
-              <button
-                type="button"
-                class="backtrack-menu-trigger ${this.openMenuId === inc.id ? 'is-active' : ''}"
-                data-menu-toggle-id="${inc.id}"
-                title="Mais opções"
-                aria-label="Mais opções"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                  <circle cx="12" cy="5" r="2.2" />
-                  <circle cx="12" cy="12" r="2.2" />
-                  <circle cx="12" cy="19" r="2.2" />
-                </svg>
-              </button>
-              <div class="backtrack-dropdown-menu ${this.openMenuId === inc.id ? 'is-open' : ''}" id="menu-${inc.id}">
-                <button type="button" class="backtrack-dropdown-item" data-share-gist-id="${inc.id}">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-                  </svg>
-                  <span>Gerar Link (Gist)</span>
-                </button>
-                <button type="button" class="backtrack-dropdown-item" data-download-id="${inc.id}">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                    <polyline points="7 10 12 15 17 10" />
-                    <line x1="12" y1="15" x2="12" y2="3" />
-                  </svg>
-                  <span>Baixar arquivo de gravação</span>
-                </button>
-                <button type="button" class="backtrack-dropdown-item" data-copy-id="${inc.id}">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                  </svg>
-                  <span>Markdown para debug</span>
-                </button>
-                <div class="backtrack-dropdown-divider"></div>
-                <button type="button" class="backtrack-dropdown-item is-danger" data-delete-id="${inc.id}">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <line x1="18" y1="6" x2="6" y2="18" />
-                    <line x1="6" y1="6" x2="18" y2="18" />
-                  </svg>
-                  <span>Excluir</span>
-                </button>
-              </div>
+            <div class="backtrack-item-chevron">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="9 18 15 12 9 6" />
+              </svg>
             </div>
           </div>
-        </div>
-      `;
+        `;
       })
       .join('');
+  }
+
+  private renderDetailViewHtml(): string {
+    const inc = this.incidents.find((i) => i.id === this.selectedIncidentId);
+    if (!inc) {
+      this.selectedIncidentId = null;
+      return this.renderIncidentsHtml();
+    }
+
+    const dateStr = new Date(inc.startedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    const durationSec = inc.finalizedAt
+      ? Math.max(1, Math.round((inc.finalizedAt - inc.startedAt) / 1000))
+      : 0;
+    const title = this.formatIncidentTitle(inc.reason);
+
+    return `
+      <div class="backtrack-detail-view">
+        <div class="backtrack-detail-header-row">
+          <button type="button" class="backtrack-btn-back" id="btn-back-to-list" aria-label="Voltar para a lista">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <line x1="19" y1="12" x2="5" y2="12" />
+              <polyline points="12 19 5 12 12 5" />
+            </svg>
+            <span>Voltar</span>
+          </button>
+        </div>
+
+        <div class="backtrack-detail-card">
+          <div class="backtrack-detail-title">${title}</div>
+          <div class="backtrack-detail-meta">${dateStr} · ${durationSec}s · ID: ${inc.id.substring(0, 14)}...</div>
+        </div>
+
+        <div class="backtrack-detail-actions">
+          <button type="button" class="backtrack-detail-action-btn backtrack-detail-btn-primary" data-view-id="${inc.id}">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polygon points="5 3 19 12 5 21 5 3" />
+            </svg>
+            <span>Visualizar Replay</span>
+          </button>
+
+          <button type="button" class="backtrack-detail-action-btn backtrack-detail-btn-secondary" data-copy-id="${inc.id}">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+            </svg>
+            <span>Markdown para debug</span>
+          </button>
+
+          <button type="button" class="backtrack-detail-action-btn backtrack-detail-btn-secondary" data-download-id="${inc.id}">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            <span>Baixar arquivo de gravação</span>
+          </button>
+
+          <button type="button" class="backtrack-detail-action-btn backtrack-detail-btn-secondary" data-share-gist-id="${inc.id}">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+            </svg>
+            <span>Gerar Link (Gist)</span>
+          </button>
+
+          <button type="button" class="backtrack-detail-action-btn backtrack-detail-btn-danger" data-delete-id="${inc.id}">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+            <span>Excluir gravação</span>
+          </button>
+        </div>
+      </div>
+    `;
   }
 
   private renderExportModal(): string {
@@ -1102,75 +1218,56 @@ export class BacktrackWidget {
       }
     }
 
-    // Se o painel está aberto, atualiza texto e dot sem recriar o DOM
+    // Se o painel está aberto, atualiza contadores e lista se não estiver em detalhe
     if (this.isOpen && panel) {
-      const statusWrap = this.shadow.querySelector('.backtrack-storage-wrap');
-      if (statusWrap) {
-        statusWrap.innerHTML = `
-          <span>${this.formatBytes(this.health?.storageBytes ?? 0)}</span>
-          ${this.health?.storageLimitExceeded ? '<span style="color: #f59e0b; margin-left: 2px; font-weight: bold; font-size: 11px;" title="Limite excedido por incidentes salvos">[!]</span>' : ''}
-          <span
-            class="backtrack-storage-tooltip-trigger"
-            title="${this.health?.protectedStorageBytes ? `${this.formatBytes(this.health.protectedStorageBytes)} protegidos. ` : ''}Gravações de incidentes salvos ficam protegidas para não serem apagadas pela reciclagem automática de memória (limite total de 50 MB no IndexedDB)."
-            aria-label="Informações sobre o armazenamento local e dados protegidos"
-          >
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="10" />
-              <line x1="12" y1="16" x2="12" y2="12" />
-              <line x1="12" y1="8" x2="12.01" y2="8" />
-            </svg>
-          </span>
-        `;
-      }
-
       const titleCount = this.shadow.getElementById('backtrack-saved-count-title');
       if (titleCount) {
-        titleCount.textContent = `Gravações Salvas (${this.incidents.length})`;
+        titleCount.textContent = String(this.incidents.length);
       }
 
-      const listContainer = this.shadow.getElementById('backtrack-incident-list-container');
-      if (listContainer) {
-        const currentIds = Array.from(
-          listContainer.querySelectorAll('[data-view-id]')
-        )
-          .map((el) => el.getAttribute('data-view-id'))
-          .join(',');
-        const newIds = this.incidents
-          .slice(0, 8)
-          .map((inc) => inc.id)
-          .join(',');
+      if (!this.selectedIncidentId) {
+        const listContainer = this.shadow.getElementById('backtrack-incident-list-container');
+        if (listContainer) {
+          const currentIds = Array.from(
+            listContainer.querySelectorAll('[data-open-detail-id]')
+          )
+            .map((el) => el.getAttribute('data-open-detail-id'))
+            .join(',');
+          const newIds = this.incidents
+            .slice(0, 8)
+            .map((inc) => inc.id)
+            .join(',');
 
-        if (currentIds !== newIds) {
-          listContainer.innerHTML = this.renderIncidentsHtml();
-          this.attachIncidentListeners();
+          if (currentIds !== newIds) {
+            listContainer.innerHTML = this.renderIncidentsHtml();
+            this.attachIncidentListeners();
+          }
         }
       }
     }
   }
 
-  private updateMenuVisibility(): void {
-    if (!this.shadow) return;
-    this.shadow.querySelectorAll('.backtrack-dropdown-menu').forEach((menu) => {
-      const menuId = menu.id.replace('menu-', '');
-      if (menuId === this.openMenuId) {
-        menu.classList.add('is-open');
-      } else {
-        menu.classList.remove('is-open');
-      }
-    });
-    this.shadow.querySelectorAll('.backtrack-menu-trigger').forEach((trigger) => {
-      const triggerId = trigger.getAttribute('data-menu-toggle-id');
-      if (triggerId === this.openMenuId) {
-        trigger.classList.add('is-active');
-      } else {
-        trigger.classList.remove('is-active');
-      }
-    });
-  }
-
   private attachIncidentListeners(): void {
     if (!this.shadow) return;
 
+    // Abrir detalhe ao clicar no item da lista
+    this.shadow.querySelectorAll('[data-open-detail-id]').forEach((item) => {
+      item.addEventListener('click', (e) => {
+        const id = (e.currentTarget as HTMLElement).getAttribute('data-open-detail-id');
+        if (id) {
+          this.selectedIncidentId = id;
+          this.render();
+        }
+      });
+    });
+
+    // Voltar da tela de detalhe para a lista
+    this.shadow.getElementById('btn-back-to-list')?.addEventListener('click', () => {
+      this.selectedIncidentId = null;
+      this.render();
+    });
+
+    // Ações dentro da tela de detalhe
     this.shadow.querySelectorAll('[data-view-id]').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         const id = (e.currentTarget as HTMLElement).getAttribute('data-view-id');
@@ -1178,51 +1275,30 @@ export class BacktrackWidget {
       });
     });
 
-    this.shadow.querySelectorAll('[data-menu-toggle-id]').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const id = (e.currentTarget as HTMLElement).getAttribute('data-menu-toggle-id');
-        this.openMenuId = this.openMenuId === id ? null : id;
-        this.updateMenuVisibility();
-      });
-    });
-
     this.shadow.querySelectorAll('[data-share-gist-id]').forEach((btn) => {
       btn.addEventListener('click', (e) => {
-        e.stopPropagation();
         const id = (e.currentTarget as HTMLElement).getAttribute('data-share-gist-id');
-        this.openMenuId = null;
-        this.updateMenuVisibility();
         if (id) this.handleShareGist(id);
       });
     });
 
     this.shadow.querySelectorAll('[data-download-id]').forEach((btn) => {
       btn.addEventListener('click', (e) => {
-        e.stopPropagation();
         const id = (e.currentTarget as HTMLElement).getAttribute('data-download-id');
-        this.openMenuId = null;
-        this.updateMenuVisibility();
         if (id) this.handleDownloadIncident(id);
       });
     });
 
     this.shadow.querySelectorAll('[data-copy-id]').forEach((btn) => {
       btn.addEventListener('click', (e) => {
-        e.stopPropagation();
         const id = (e.currentTarget as HTMLElement).getAttribute('data-copy-id');
-        this.openMenuId = null;
-        this.updateMenuVisibility();
         if (id) this.handleCopyMarkdown(id);
       });
     });
 
     this.shadow.querySelectorAll('[data-delete-id]').forEach((btn) => {
       btn.addEventListener('click', (e) => {
-        e.stopPropagation();
         const id = (e.currentTarget as HTMLElement).getAttribute('data-delete-id');
-        this.openMenuId = null;
-        this.updateMenuVisibility();
         if (id) this.handleDeleteIncident(id);
       });
     });
@@ -1262,12 +1338,10 @@ export class BacktrackWidget {
             const t = e.touches[0];
             const dx = t.clientX - touchStartX;
             const dy = t.clientY - touchStartY;
-            if (Math.hypot(dx, dy) > 6) {
+            if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
               hasMoved = true;
-              const newLeft = Math.max(8, Math.min(window.innerWidth - 46, initialLeft + dx));
-              const newTop = Math.max(8, Math.min(window.innerHeight - 46, initialTop + dy));
-              this.container.style.left = `${newLeft}px`;
-              this.container.style.top = `${newTop}px`;
+              this.container.style.left = `${initialLeft + dx}px`;
+              this.container.style.top = `${initialTop + dy}px`;
               this.container.style.bottom = 'auto';
               this.container.style.right = 'auto';
             }
@@ -1300,7 +1374,15 @@ export class BacktrackWidget {
         this.toggleOpen();
       });
 
-      this.shadow.getElementById('btn-hide-widget')?.addEventListener('click', () => {
+      this.shadow.getElementById('btn-header-menu')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.isHeaderMenuOpen = !this.isHeaderMenuOpen;
+        this.render();
+      });
+
+      this.shadow.getElementById('btn-hide-widget')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.isHeaderMenuOpen = false;
         this.showHideConfirmModal = true;
         this.render();
       });
@@ -1416,15 +1498,14 @@ export class BacktrackWidget {
       }
 
       this.shadow.querySelector('.backtrack-panel')?.addEventListener('click', (e) => {
-        if (this.openMenuId) {
+        if (this.isHeaderMenuOpen) {
           const target = e.target as HTMLElement | null;
-          if (!target?.closest('.backtrack-menu-wrapper')) {
-            this.openMenuId = null;
-            this.updateMenuVisibility();
+          if (!target?.closest('.backtrack-header-menu-wrap')) {
+            this.isHeaderMenuOpen = false;
+            this.render();
           }
         }
       });
     }
   }
-
 }
