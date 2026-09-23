@@ -138,9 +138,9 @@ describe('Backtrack v0.1.2 — Widget Nativo e Privacidade por Rota', () => {
       let downloadModal = host?.shadowRoot?.querySelector('.backtrack-modal-card');
       expect(downloadModal).not.toBeNull();
       expect(downloadModal?.textContent).toContain('Baixar Arquivo de Gravação');
-      expect(downloadModal?.textContent).toContain('JSON Otimizado para IA (.ai.json)');
-      expect(downloadModal?.textContent).toContain('Arquivo compactado (.ffr.json.gz)');
-      expect(downloadModal?.textContent).toContain('Arquivo completo (.ffr.json)');
+      expect(downloadModal?.textContent).toContain('JSON para IA (.ai.json)');
+      expect(downloadModal?.textContent).toContain('Compactado Gzip (.ffr.json.gz)');
+      expect(downloadModal?.textContent).toContain('JSON Completo (.ffr.json)');
 
       // Tenta clicar em Baixar sem selecionar nenhuma opção -> validação
       const confirmDownloadBtn = host?.shadowRoot?.getElementById('btn-confirm-download-modal');

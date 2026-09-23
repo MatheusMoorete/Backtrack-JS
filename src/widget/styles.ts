@@ -714,12 +714,31 @@ export const WIDGET_CSS = `
 }
 
 .backtrack-modal-body {
-  padding: 14px;
+  padding: 12px 14px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   flex: 1;
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #334155 transparent;
+}
+
+.backtrack-modal-body::-webkit-scrollbar {
+  width: 5px;
+}
+
+.backtrack-modal-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.backtrack-modal-body::-webkit-scrollbar-thumb {
+  background-color: #334155;
+  border-radius: 4px;
+}
+
+.backtrack-modal-body::-webkit-scrollbar-thumb:hover {
+  background-color: #475569;
 }
 
 .backtrack-modal-checkbox-label {
@@ -756,7 +775,7 @@ export const WIDGET_CSS = `
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding: 10px 12px;
+  padding: 8px 10px;
   border: 1px solid #1e293b;
   border-radius: 6px;
   background-color: #0b0f17;

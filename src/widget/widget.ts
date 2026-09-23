@@ -342,15 +342,20 @@ export class BacktrackWidget {
         : compress
         ? 'Download do arquivo compactado (.ffr.json.gz) iniciado!'
         : 'Download do arquivo (.ffr.json) iniciado!';
-      this.closeDownloadModal();
     } catch {
       this.downloadModalError = 'Falha ao exportar incidente.';
       this.isDownloading = false;
       this.render();
       return;
+    } finally {
+      this.isDownloading = false;
     }
 
+    this.downloadModalIncidentId = null;
+    this.downloadModalFormat = null;
+    this.downloadModalError = null;
     this.render();
+
     setTimeout(() => {
       this.alertMessage = null;
       this.render();
@@ -430,7 +435,6 @@ export class BacktrackWidget {
       } else {
         this.alertMessage = 'Área de transferência indisponível.';
       }
-      this.closeExportModal();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes('401')) {
@@ -444,9 +448,14 @@ export class BacktrackWidget {
       this.isExportingMarkdown = false;
       this.render();
       return;
+    } finally {
+      this.isExportingMarkdown = false;
     }
 
+    this.exportModalIncidentId = null;
+    this.exportModalError = null;
     this.render();
+
     setTimeout(() => {
       this.alertMessage = null;
       this.render();
@@ -991,22 +1000,22 @@ export class BacktrackWidget {
             <label class="backtrack-modal-radio-label ${this.downloadModalFormat === 'ai' ? 'is-selected' : ''}">
               <input type="radio" name="backtrack-download-format" value="ai" id="radio-format-ai" ${this.downloadModalFormat === 'ai' ? 'checked' : ''} ${this.isDownloading ? 'disabled' : ''} />
               <div>
-                <span class="backtrack-modal-radio-title">JSON Otimizado para IA (.ai.json) — Leve (&lt; 100 KB)</span>
-                <p class="backtrack-modal-radio-desc">Sem gravacao visual pesada. Preserva linha do tempo, console, rede e erros completos. Ideal para Gemini e Claude.</p>
+                <span class="backtrack-modal-radio-title">JSON para IA (.ai.json)</span>
+                <p class="backtrack-modal-radio-desc">Leve (&lt; 100 KB), sem replay visual. Ideal para Gemini e Claude.</p>
               </div>
             </label>
             <label class="backtrack-modal-radio-label ${this.downloadModalFormat === 'gzip' ? 'is-selected' : ''}">
               <input type="radio" name="backtrack-download-format" value="gzip" id="radio-format-gzip" ${this.downloadModalFormat === 'gzip' ? 'checked' : ''} ${this.isDownloading ? 'disabled' : ''} />
               <div>
-                <span class="backtrack-modal-radio-title">Arquivo compactado (.ffr.json.gz) — Menor tamanho</span>
-                <p class="backtrack-modal-radio-desc">Compactado com Gzip (~90% menor, ~100 KB). Ideal para compartilhamento rápido no Slack, Jira ou WhatsApp.</p>
+                <span class="backtrack-modal-radio-title">Compactado Gzip (.ffr.json.gz)</span>
+                <p class="backtrack-modal-radio-desc">Replay completo (~90% menor). Ideal para Slack, Jira e WhatsApp.</p>
               </div>
             </label>
             <label class="backtrack-modal-radio-label ${this.downloadModalFormat === 'uncompressed' ? 'is-selected' : ''}">
               <input type="radio" name="backtrack-download-format" value="uncompressed" id="radio-format-uncompressed" ${this.downloadModalFormat === 'uncompressed' ? 'checked' : ''} ${this.isDownloading ? 'disabled' : ''} />
               <div>
-                <span class="backtrack-modal-radio-title">Arquivo completo (.ffr.json) — Maior tamanho</span>
-                <p class="backtrack-modal-radio-desc">JSON descompactado (~1 MB+). Útil para leitura e inspeção direta de texto bruto.</p>
+                <span class="backtrack-modal-radio-title">JSON Completo (.ffr.json)</span>
+                <p class="backtrack-modal-radio-desc">Replay bruto descompactado (&gt; 1 MB). Para inspeção direta.</p>
               </div>
             </label>
             ${this.downloadModalError ? `<div class="backtrack-modal-error">${this.downloadModalError}</div>` : ''}

@@ -657,10 +657,10 @@ export const IncidentHeader: React.FC<IncidentHeaderProps> = ({ artifact, onRese
                     />
                     <div>
                       <span style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#f1f5f9' }}>
-                        JSON Otimizado para IA (.ai.json) — Leve (&lt; 100 KB)
+                        JSON para IA (.ai.json)
                       </span>
-                      <p style={{ margin: '3px 0 0 0', fontSize: '11px', color: '#94a3b8', lineHeight: 1.35 }}>
-                        Sem gravacao visual pesada. Preserva linha do tempo, console, rede e erros completos. Ideal para Gemini e Claude.
+                      <p style={{ margin: '2px 0 0 0', fontSize: '11px', color: '#94a3b8', lineHeight: 1.35 }}>
+                        Leve (&lt; 100 KB), sem replay visual. Ideal para Gemini e Claude.
                       </p>
                     </div>
                   </label>
@@ -670,7 +670,7 @@ export const IncidentHeader: React.FC<IncidentHeaderProps> = ({ artifact, onRese
                       display: 'flex',
                       alignItems: 'flex-start',
                       gap: '10px',
-                      padding: '10px 12px',
+                      padding: '8px 10px',
                       border: downloadFormat === 'gzip' ? '1px solid #2563eb' : '1px solid #334155',
                       borderRadius: '6px',
                       background: downloadFormat === 'gzip' ? 'rgba(37, 99, 235, 0.1)' : '#0f172a',
@@ -695,10 +695,10 @@ export const IncidentHeader: React.FC<IncidentHeaderProps> = ({ artifact, onRese
                     />
                     <div>
                       <span style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#f1f5f9' }}>
-                        Arquivo compactado (.ffr.json.gz) — Menor tamanho
+                        Compactado Gzip (.ffr.json.gz)
                       </span>
-                      <p style={{ margin: '3px 0 0 0', fontSize: '11px', color: '#94a3b8', lineHeight: 1.35 }}>
-                        Compactado com Gzip (~90% menor, ~100 KB). Ideal para compartilhamento rápido no Slack, Jira ou WhatsApp.
+                      <p style={{ margin: '2px 0 0 0', fontSize: '11px', color: '#94a3b8', lineHeight: 1.35 }}>
+                        Replay completo (~90% menor). Ideal para Slack, Jira e WhatsApp.
                       </p>
                     </div>
                   </label>
@@ -708,7 +708,7 @@ export const IncidentHeader: React.FC<IncidentHeaderProps> = ({ artifact, onRese
                       display: 'flex',
                       alignItems: 'flex-start',
                       gap: '10px',
-                      padding: '10px 12px',
+                      padding: '8px 10px',
                       border: downloadFormat === 'uncompressed' ? '1px solid #2563eb' : '1px solid #334155',
                       borderRadius: '6px',
                       background: downloadFormat === 'uncompressed' ? 'rgba(37, 99, 235, 0.1)' : '#0f172a',
@@ -733,10 +733,10 @@ export const IncidentHeader: React.FC<IncidentHeaderProps> = ({ artifact, onRese
                     />
                     <div>
                       <span style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#f1f5f9' }}>
-                        Arquivo completo (.ffr.json) — Maior tamanho
+                        JSON Completo (.ffr.json)
                       </span>
-                      <p style={{ margin: '3px 0 0 0', fontSize: '11px', color: '#94a3b8', lineHeight: 1.35 }}>
-                        JSON descompactado (~1 MB+). Útil para leitura e inspeção direta de texto bruto.
+                      <p style={{ margin: '2px 0 0 0', fontSize: '11px', color: '#94a3b8', lineHeight: 1.35 }}>
+                        Replay bruto descompactado (&gt; 1 MB). Para inspeção direta.
                       </p>
                     </div>
                   </label>
