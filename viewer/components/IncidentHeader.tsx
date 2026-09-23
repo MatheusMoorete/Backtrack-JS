@@ -135,7 +135,30 @@ export const IncidentHeader: React.FC<IncidentHeaderProps> = ({ artifact, onRese
       }
 
       const md = formatIncidentMarkdown(artifact, { replayUrl });
-      await navigator.clipboard.writeText(md);
+      let copied = false;
+      if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+        try {
+          await navigator.clipboard.writeText(md);
+          copied = true;
+        } catch {
+          // Fallback via textarea
+        }
+      }
+      if (!copied && typeof document !== 'undefined') {
+        try {
+          const textarea = document.createElement('textarea');
+          textarea.value = md;
+          textarea.style.position = 'fixed';
+          textarea.style.opacity = '0';
+          document.body.appendChild(textarea);
+          textarea.focus();
+          textarea.select();
+          copied = document.execCommand('copy');
+          document.body.removeChild(textarea);
+        } catch {
+          copied = false;
+        }
+      }
 
       setMdCopied(true);
       setShowJiraModal(false);
@@ -457,7 +480,7 @@ export const IncidentHeader: React.FC<IncidentHeaderProps> = ({ artifact, onRese
                 disabled={isExporting}
                 style={{ background: '#2563eb', borderColor: '#3b82f6', color: '#ffffff', fontWeight: 500, padding: '6px 14px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}
               >
-                {isExporting ? 'Criando link do Gist...' : 'Copiar Markdown para debug'}
+                {isExporting ? (includeLink ? 'Criando link do Gist...' : 'Copiando...') : 'Copiar Markdown para debug'}
               </button>
             </div>
           </div>

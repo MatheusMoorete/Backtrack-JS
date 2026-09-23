@@ -217,7 +217,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
       case 'performance':
         return (
           <span className="timeline-summary-text" style={{ color: '#f59e0b' }}>
-            ⚠️ Congelamento de tela: <strong>{evt.durationMs}ms</strong> ({evt.details})
+            Congelamento de tela: <strong>{evt.durationMs}ms</strong> ({evt.details})
           </span>
         );
       default:

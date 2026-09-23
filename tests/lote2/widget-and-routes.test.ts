@@ -171,8 +171,19 @@ describe('Backtrack v0.1.2 — Widget Nativo e Privacidade por Rota', () => {
       expect(modal).not.toBeNull();
       expect(modal?.textContent).toContain('Markdown para debug');
       expect(modal?.textContent).toContain('Adicionar link do replay interativo?');
-      const cancelBtn = host?.shadowRoot?.getElementById('btn-cancel-export-modal');
-      (cancelBtn as HTMLButtonElement)?.click();
+
+      // Desmarca a opção de link interativo do replay
+      const checkIncludeLink = host?.shadowRoot?.getElementById('check-include-incident-link') as HTMLInputElement;
+      expect(checkIncludeLink.checked).toBe(true);
+      checkIncludeLink.checked = false;
+      checkIncludeLink.dispatchEvent(new Event('change'));
+
+      // Confirma cópia do Markdown (sem Gist)
+      const confirmExportBtn = host?.shadowRoot?.getElementById('btn-confirm-export-modal') as HTMLButtonElement;
+      confirmExportBtn?.click();
+
+      // Aguarda processamento assíncrono e verifica fechamento do modal
+      await new Promise((r) => setTimeout(r, 50));
       expect(host?.shadowRoot?.querySelector('.backtrack-modal-card')).toBeNull();
 
       widget.unmount();

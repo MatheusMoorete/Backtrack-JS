@@ -427,8 +427,32 @@ export class BacktrackWidget {
       }
 
       const md = formatIncidentMarkdown(artifact, { replayUrl });
-      if (typeof navigator !== 'undefined' && navigator.clipboard) {
-        await navigator.clipboard.writeText(md);
+      let copied = false;
+      if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+        try {
+          await navigator.clipboard.writeText(md);
+          copied = true;
+        } catch {
+          // Fallback via textarea
+        }
+      }
+      if (!copied && typeof document !== 'undefined') {
+        try {
+          const textarea = document.createElement('textarea');
+          textarea.value = md;
+          textarea.style.position = 'fixed';
+          textarea.style.opacity = '0';
+          document.body.appendChild(textarea);
+          textarea.focus();
+          textarea.select();
+          copied = document.execCommand('copy');
+          document.body.removeChild(textarea);
+        } catch {
+          copied = false;
+        }
+      }
+
+      if (copied) {
         this.alertMessage = this.exportModalIncludeLink
           ? 'Markdown para debug copiado com link do replay!'
           : 'Markdown para debug copiado!';
@@ -718,7 +742,7 @@ export class BacktrackWidget {
                       </svg>
                     </button>
                     • ${this.formatBytes(this.health?.storageBytes ?? 0)}${this.health?.protectedStorageBytes ? ` (protegido: ${this.formatBytes(this.health.protectedStorageBytes)})` : ''}
-                    ${this.health?.storageLimitExceeded ? '<span style="color: #f59e0b; margin-left: 2px;" title="Limite excedido por incidentes salvos">⚠️</span>' : ''}
+                    ${this.health?.storageLimitExceeded ? '<span style="color: #f59e0b; margin-left: 2px; font-weight: bold; font-size: 11px;" title="Limite excedido por incidentes salvos">[!]</span>' : ''}
                     <span
                       class="backtrack-storage-tooltip-trigger"
                       title="Os dados de replay são armazenados localmente no IndexedDB do seu navegador. O limite máximo é de 50 MB (gravações antigas são recicladas automaticamente). Chunks protegidos por incidentes não são apagados pela retenção."
@@ -973,7 +997,7 @@ export class BacktrackWidget {
           <div class="backtrack-modal-footer">
             <button type="button" class="backtrack-btn-secondary" id="btn-cancel-export-modal" ${this.isExportingMarkdown ? 'disabled' : ''}>Cancelar</button>
             <button type="button" class="backtrack-btn-primary" id="btn-confirm-export-modal" ${this.isExportingMarkdown ? 'disabled' : ''}>
-              ${this.isExportingMarkdown ? 'Criando link do Gist...' : 'Copiar Markdown para debug'}
+              ${this.isExportingMarkdown ? (this.exportModalIncludeLink ? 'Criando link do Gist...' : 'Copiando...') : 'Copiar Markdown para debug'}
             </button>
           </div>
         </div>
@@ -1093,7 +1117,7 @@ export class BacktrackWidget {
             </svg>
           </button>
           • ${this.formatBytes(this.health?.storageBytes ?? 0)}${this.health?.protectedStorageBytes ? ` (protegido: ${this.formatBytes(this.health.protectedStorageBytes)})` : ''}
-          ${this.health?.storageLimitExceeded ? '<span style="color: #f59e0b; margin-left: 2px;" title="Limite excedido por incidentes salvos">⚠️</span>' : ''}
+          ${this.health?.storageLimitExceeded ? '<span style="color: #f59e0b; margin-left: 2px; font-weight: bold; font-size: 11px;" title="Limite excedido por incidentes salvos">[!]</span>' : ''}
         `;
         this.attachConfigViewerListener();
       }
