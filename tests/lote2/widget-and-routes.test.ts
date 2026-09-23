@@ -129,12 +129,43 @@ describe('Backtrack v0.1.2 — Widget Nativo e Privacidade por Rota', () => {
       const copyBtn = host?.shadowRoot?.querySelector('[data-copy-id]');
       const deleteBtn = host?.shadowRoot?.querySelector('[data-delete-id]');
 
-      expect(downloadBtn?.textContent).toContain('Baixar (.ffr.json)');
+      expect(downloadBtn?.textContent).toContain('Baixar arquivo de gravação');
       expect(copyBtn?.textContent).toContain('Copiar Markdown');
       expect(deleteBtn?.textContent).toContain('Excluir');
 
+      // Clica em Baixar arquivo de gravação para abrir modal com 2 radio buttons
+      (downloadBtn as HTMLButtonElement)?.click();
+      let downloadModal = host?.shadowRoot?.querySelector('.backtrack-modal-card');
+      expect(downloadModal).not.toBeNull();
+      expect(downloadModal?.textContent).toContain('Baixar Arquivo de Gravação');
+      expect(downloadModal?.textContent).toContain('Arquivo compactado (.ffr.json.gz)');
+      expect(downloadModal?.textContent).toContain('Arquivo completo (.ffr.json)');
+
+      // Tenta clicar em Baixar sem selecionar nenhuma opção -> validação
+      const confirmDownloadBtn = host?.shadowRoot?.getElementById('btn-confirm-download-modal');
+      (confirmDownloadBtn as HTMLButtonElement)?.click();
+      const errorMsg = host?.shadowRoot?.querySelector('.backtrack-modal-error');
+      expect(errorMsg?.textContent).toBe('Escolha uma opção antes de baixar');
+
+      // Seleciona a opção gzip
+      const gzipRadio = host?.shadowRoot?.getElementById('radio-format-gzip') as HTMLInputElement;
+      gzipRadio?.click();
+      gzipRadio?.dispatchEvent(new Event('change'));
+
+      // Erro é limpo ao selecionar
+      expect(host?.shadowRoot?.querySelector('.backtrack-modal-error')).toBeNull();
+
+      // Fecha o modal de download
+      const cancelDownloadBtn = host?.shadowRoot?.getElementById('btn-cancel-download-modal');
+      (cancelDownloadBtn as HTMLButtonElement)?.click();
+      expect(host?.shadowRoot?.querySelector('.backtrack-modal-card')).toBeNull();
+
+      // Reabre o menu de 3 pontos
+      (host?.shadowRoot?.querySelector('.backtrack-menu-trigger') as HTMLButtonElement)?.click();
+
       // Clica em Copiar Markdown para abrir modal de opções
-      (copyBtn as HTMLButtonElement)?.click();
+      const copyBtnReopened = host?.shadowRoot?.querySelector('[data-copy-id]');
+      (copyBtnReopened as HTMLButtonElement)?.click();
       const modal = host?.shadowRoot?.querySelector('.backtrack-modal-card');
       expect(modal).not.toBeNull();
       expect(modal?.textContent).toContain('Adicionar link do incidente?');

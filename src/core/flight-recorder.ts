@@ -270,7 +270,7 @@ export class FlightRecorderImpl implements FlightRecorder {
         environment,
         {
           afterErrorSeconds: this.options.afterErrorSeconds,
-          recorderVersion: this.options.recorderVersion ?? '0.3.5',
+          recorderVersion: this.options.recorderVersion ?? '0.3.6',
           getRecordingIssues: () => [
             ...this.stateMachine.getDegradedReasons(),
             ...((this.rrwebCapturer?.getDroppedEventsCount() ?? 0) > 0
@@ -484,7 +484,7 @@ export class FlightRecorderImpl implements FlightRecorder {
       // Instancia manager ad-hoc para exportar mesmo se parado
       const env = this.getEnvironmentMetadata();
       const mgr = new IncidentManager(this.db, '', '', env, {
-        recorderVersion: this.options.recorderVersion ?? '0.3.5',
+        recorderVersion: this.options.recorderVersion ?? '0.3.6',
         getRecordingIssues: () => this.stateMachine.getDegradedReasons()
       });
       return mgr.exportArtifact(incidentId);

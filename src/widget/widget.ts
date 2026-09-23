@@ -30,6 +30,11 @@ export class BacktrackWidget {
   private isExportingMarkdown = false;
   private exportModalError: string | null = null;
 
+  private downloadModalIncidentId: string | null = null;
+  private downloadModalFormat: 'gzip' | 'uncompressed' | null = null;
+  private isDownloading = false;
+  private downloadModalError: string | null = null;
+
   private wasDragged = false;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private handleGlobalKey?: (e: KeyboardEvent) => void;
@@ -73,6 +78,11 @@ export class BacktrackWidget {
     // Atalho global para alternar visibilidade (Ctrl+Shift+B ou Cmd+Shift+B) e fechar com Escape
     this.handleGlobalKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape' || e.key === 'Esc') {
+        if (this.downloadModalIncidentId) {
+          e.preventDefault();
+          this.closeDownloadModal();
+          return;
+        }
         if (this.exportModalIncidentId) {
           e.preventDefault();
           this.closeExportModal();
@@ -288,18 +298,60 @@ export class BacktrackWidget {
     }
   }
 
-  private async handleDownloadIncident(incidentId: string): Promise<void> {
-    try {
-      await this.recorder.exportIncident(incidentId);
-      this.alertMessage = 'Download do arquivo .ffr.json iniciado!';
+  private handleDownloadIncident(incidentId: string): void {
+    this.openDownloadModal(incidentId);
+  }
+
+  private openDownloadModal(incidentId: string): void {
+    this.downloadModalIncidentId = incidentId;
+    this.downloadModalFormat = null;
+    this.downloadModalError = null;
+    this.isDownloading = false;
+    this.openMenuId = null;
+    this.render();
+  }
+
+  private closeDownloadModal(): void {
+    if (this.isDownloading) return;
+    this.downloadModalIncidentId = null;
+    this.downloadModalFormat = null;
+    this.downloadModalError = null;
+    this.render();
+  }
+
+  private async confirmDownload(): Promise<void> {
+    const id = this.downloadModalIncidentId;
+    if (!id) return;
+
+    if (!this.downloadModalFormat) {
+      this.downloadModalError = 'Escolha uma opção antes de baixar';
       this.render();
-      setTimeout(() => {
-        this.alertMessage = null;
-        this.render();
-      }, 3000);
-    } catch {
-      alert('Falha ao exportar incidente.');
+      return;
     }
+
+    this.isDownloading = true;
+    this.downloadModalError = null;
+    this.render();
+
+    try {
+      const compress = this.downloadModalFormat === 'gzip';
+      await this.recorder.exportIncident(id, { compress });
+      this.alertMessage = compress
+        ? 'Download do arquivo compactado (.ffr.json.gz) iniciado!'
+        : 'Download do arquivo (.ffr.json) iniciado!';
+      this.closeDownloadModal();
+    } catch {
+      this.downloadModalError = 'Falha ao exportar incidente.';
+      this.isDownloading = false;
+      this.render();
+      return;
+    }
+
+    this.render();
+    setTimeout(() => {
+      this.alertMessage = null;
+      this.render();
+    }, 3500);
   }
 
   private handleCopyMarkdown(incidentId: string): void {
@@ -791,6 +843,7 @@ export class BacktrackWidget {
             </div>
 
             ${this.exportModalIncidentId ? this.renderExportModal() : ''}
+            ${this.downloadModalIncidentId ? this.renderDownloadModal() : ''}
           </div>
         `
             : ''
@@ -855,7 +908,7 @@ export class BacktrackWidget {
                     <polyline points="7 10 12 15 17 10" />
                     <line x1="12" y1="15" x2="12" y2="3" />
                   </svg>
-                  <span>Baixar (.ffr.json)</span>
+                  <span>Baixar arquivo de gravação</span>
                 </button>
                 <button type="button" class="backtrack-dropdown-item" data-copy-id="${inc.id}">
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -909,6 +962,49 @@ export class BacktrackWidget {
             <button type="button" class="backtrack-btn-secondary" id="btn-cancel-export-modal" ${this.isExportingMarkdown ? 'disabled' : ''}>Cancelar</button>
             <button type="button" class="backtrack-btn-primary" id="btn-confirm-export-modal" ${this.isExportingMarkdown ? 'disabled' : ''}>
               ${this.isExportingMarkdown ? 'Criando link do Gist...' : 'Copiar Markdown'}
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  private renderDownloadModal(): string {
+    return `
+      <div class="backtrack-modal-overlay">
+        <div class="backtrack-modal-card">
+          <div class="backtrack-modal-header">
+            <div class="backtrack-modal-title">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+              <span>Baixar Arquivo de Gravação</span>
+            </div>
+            <button type="button" class="backtrack-modal-close" id="btn-close-download-modal" aria-label="Fechar">✕</button>
+          </div>
+          <div class="backtrack-modal-body">
+            <label class="backtrack-modal-radio-label ${this.downloadModalFormat === 'gzip' ? 'is-selected' : ''}">
+              <input type="radio" name="backtrack-download-format" value="gzip" id="radio-format-gzip" ${this.downloadModalFormat === 'gzip' ? 'checked' : ''} ${this.isDownloading ? 'disabled' : ''} />
+              <div>
+                <span class="backtrack-modal-radio-title">Arquivo compactado (.ffr.json.gz) — Menor tamanho</span>
+                <p class="backtrack-modal-radio-desc">Compactado com Gzip (~90% menor, ~100 KB). Ideal para compartilhamento rápido no Slack, Jira ou WhatsApp.</p>
+              </div>
+            </label>
+            <label class="backtrack-modal-radio-label ${this.downloadModalFormat === 'uncompressed' ? 'is-selected' : ''}">
+              <input type="radio" name="backtrack-download-format" value="uncompressed" id="radio-format-uncompressed" ${this.downloadModalFormat === 'uncompressed' ? 'checked' : ''} ${this.isDownloading ? 'disabled' : ''} />
+              <div>
+                <span class="backtrack-modal-radio-title">Arquivo completo (.ffr.json) — Maior tamanho</span>
+                <p class="backtrack-modal-radio-desc">JSON descompactado (~1 MB+). Útil para leitura e inspeção direta de texto bruto.</p>
+              </div>
+            </label>
+            ${this.downloadModalError ? `<div class="backtrack-modal-error">${this.downloadModalError}</div>` : ''}
+          </div>
+          <div class="backtrack-modal-footer">
+            <button type="button" class="backtrack-btn-secondary" id="btn-cancel-download-modal" ${this.isDownloading ? 'disabled' : ''}>Cancelar</button>
+            <button type="button" class="backtrack-btn-primary" id="btn-confirm-download-modal" ${this.isDownloading ? 'disabled' : ''}>
+              ${this.isDownloading ? 'Baixando...' : 'Baixar'}
             </button>
           </div>
         </div>
@@ -1231,6 +1327,28 @@ export class BacktrackWidget {
         });
         this.shadow.getElementById('btn-confirm-export-modal')?.addEventListener('click', () => {
           this.confirmCopyMarkdown();
+        });
+      }
+
+      if (this.downloadModalIncidentId) {
+        this.shadow.getElementById('btn-close-download-modal')?.addEventListener('click', () => {
+          this.closeDownloadModal();
+        });
+        this.shadow.getElementById('btn-cancel-download-modal')?.addEventListener('click', () => {
+          this.closeDownloadModal();
+        });
+        this.shadow.getElementById('radio-format-gzip')?.addEventListener('change', () => {
+          this.downloadModalFormat = 'gzip';
+          this.downloadModalError = null;
+          this.render();
+        });
+        this.shadow.getElementById('radio-format-uncompressed')?.addEventListener('change', () => {
+          this.downloadModalFormat = 'uncompressed';
+          this.downloadModalError = null;
+          this.render();
+        });
+        this.shadow.getElementById('btn-confirm-download-modal')?.addEventListener('click', () => {
+          this.confirmDownload();
         });
       }
 

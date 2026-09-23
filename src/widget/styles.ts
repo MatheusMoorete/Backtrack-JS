@@ -751,6 +751,51 @@ export const WIDGET_CSS = `
   line-height: 1.35;
 }
 
+.backtrack-modal-radio-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid #1e293b;
+  border-radius: 6px;
+  background-color: #0b0f17;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.backtrack-modal-radio-label:hover {
+  border-color: #3b82f6;
+  background-color: #111827;
+}
+
+.backtrack-modal-radio-label.is-selected {
+  border-color: #2563eb;
+  background-color: rgba(37, 99, 235, 0.1);
+}
+
+.backtrack-modal-radio-label input[type="radio"] {
+  margin-top: 2px;
+  width: 15px;
+  height: 15px;
+  accent-color: #2563eb;
+  cursor: pointer;
+}
+
+.backtrack-modal-radio-title {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #f1f5f9;
+}
+
+.backtrack-modal-radio-desc {
+  margin: 3px 0 0 0;
+  font-size: 11px;
+  color: #94a3b8;
+  line-height: 1.35;
+}
+
 .backtrack-modal-error {
   padding: 6px 8px;
   background: rgba(239, 68, 68, 0.15);
