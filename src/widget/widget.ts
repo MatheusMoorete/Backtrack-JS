@@ -18,7 +18,6 @@ export class BacktrackWidget {
   private isOpen = false;
   private selectedDurationSeconds = 300; // 5m default (ou 0 para Tudo)
   private isCapturing = false;
-  private isViewerOnline = false;
   private incidents: IncidentSummary[] = [];
   private health: RecorderHealth | null = null;
   private alertMessage: string | null = null;
@@ -34,6 +33,7 @@ export class BacktrackWidget {
   private downloadModalFormat: 'gzip' | 'uncompressed' | 'ai' | null = null;
   private isDownloading = false;
   private downloadModalError: string | null = null;
+  private showHideConfirmModal = false;
 
   private wasDragged = false;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -78,6 +78,12 @@ export class BacktrackWidget {
     // Atalho global para alternar visibilidade (Ctrl+Shift+B ou Cmd+Shift+B) e fechar com Escape
     this.handleGlobalKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape' || e.key === 'Esc') {
+        if (this.showHideConfirmModal) {
+          e.preventDefault();
+          this.showHideConfirmModal = false;
+          this.render();
+          return;
+        }
         if (this.downloadModalIncidentId) {
           e.preventDefault();
           this.closeDownloadModal();
@@ -128,6 +134,7 @@ export class BacktrackWidget {
   }
 
   public hide(): void {
+    this.showHideConfirmModal = false;
     if (this.container) {
       this.container.style.display = 'none';
     }
@@ -215,36 +222,10 @@ export class BacktrackWidget {
     return (this.options.defaultViewerUrl || DEFAULT_VIEWER_URL).replace(/\/+$/, '');
   }
 
-  private isCheckingViewer = false;
-  private async checkViewerOnline(): Promise<boolean> {
-    if (this.isCheckingViewer) return this.isViewerOnline;
-    this.isCheckingViewer = true;
-    const viewerUrl = this.getViewerUrl();
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 1200);
-      const res = await fetch(viewerUrl, {
-        method: 'GET',
-        mode: 'no-cors',
-        signal: controller.signal,
-        cache: 'no-store'
-      });
-      clearTimeout(timeout);
-      return res.type === 'opaque' || res.ok || res.status === 200;
-    } catch {
-      return false;
-    } finally {
-      this.isCheckingViewer = false;
-    }
-  }
-
   private async updateData(): Promise<void> {
     try {
       this.health = this.recorder.getHealth();
       this.incidents = await this.recorder.listIncidents();
-      if (this.isOpen) {
-        this.isViewerOnline = await this.checkViewerOnline();
-      }
       this.updateDomValues();
     } catch {
       // Ignora erro
@@ -726,27 +707,13 @@ export class BacktrackWidget {
                   Backtrack
                 </div>
                 <div class="backtrack-panel-subtitle">
-                  <span class="backtrack-viewer-status-wrap">
-                    <span class="backtrack-status-dot ${this.isViewerOnline ? 'backtrack-status-online' : 'backtrack-status-offline'}"></span>
-                    ${this.isViewerOnline ? 'Visualizador online' : 'Visualizador offline'}
-                    <button
-                      type="button"
-                      class="backtrack-config-viewer-btn"
-                      id="btn-config-viewer-url"
-                      title="Configurar URL do Visualizador (ex: túnel Cloudflare). Atual: ${this.getViewerUrl()}"
-                      aria-label="Configurar URL do Visualizador"
-                    >
-                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M12 20h9" />
-                        <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
-                      </svg>
-                    </button>
-                    • ${this.formatBytes(this.health?.storageBytes ?? 0)}${this.health?.protectedStorageBytes ? ` (protegido: ${this.formatBytes(this.health.protectedStorageBytes)})` : ''}
+                  <span class="backtrack-storage-wrap">
+                    <span>${this.formatBytes(this.health?.storageBytes ?? 0)}</span>
                     ${this.health?.storageLimitExceeded ? '<span style="color: #f59e0b; margin-left: 2px; font-weight: bold; font-size: 11px;" title="Limite excedido por incidentes salvos">[!]</span>' : ''}
                     <span
                       class="backtrack-storage-tooltip-trigger"
-                      title="Os dados de replay são armazenados localmente no IndexedDB do seu navegador. O limite máximo é de 50 MB (gravações antigas são recicladas automaticamente). Chunks protegidos por incidentes não são apagados pela retenção."
-                      aria-label="Informações sobre o armazenamento local no IndexedDB"
+                      title="${this.health?.protectedStorageBytes ? `${this.formatBytes(this.health.protectedStorageBytes)} protegidos. ` : ''}Gravações de incidentes salvos ficam protegidas para não serem apagadas pela reciclagem automática de memória (limite total de 50 MB no IndexedDB)."
+                      aria-label="Informações sobre o armazenamento local e dados protegidos"
                     >
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
                         <circle cx="12" cy="12" r="10" />
@@ -880,6 +847,7 @@ export class BacktrackWidget {
 
             ${this.exportModalIncidentId ? this.renderExportModal() : ''}
             ${this.downloadModalIncidentId ? this.renderDownloadModal() : ''}
+            ${this.showHideConfirmModal ? this.renderHideConfirmModal() : ''}
           </div>
         `
             : ''
@@ -1055,6 +1023,43 @@ export class BacktrackWidget {
     `;
   }
 
+  private renderHideConfirmModal(): string {
+    return `
+      <div class="backtrack-modal-overlay">
+        <div class="backtrack-modal-card">
+          <div class="backtrack-modal-header">
+            <div class="backtrack-modal-title">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+                <line x1="1" y1="1" x2="23" y2="23" />
+              </svg>
+              <span>Ocultar Backtrack</span>
+            </div>
+            <button type="button" class="backtrack-modal-close" id="btn-close-hide-modal" aria-label="Fechar">✕</button>
+          </div>
+          <div class="backtrack-modal-body">
+            <p style="margin: 0 0 12px 0; color: #cbd5e1; font-size: 13px; line-height: 1.5;">
+              O ícone do Backtrack será ocultado da tela.
+            </p>
+            <div style="background: rgba(56, 189, 248, 0.08); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 6px; padding: 10px 12px; margin-bottom: 8px;">
+              <span style="display: block; font-weight: 600; color: #38bdf8; font-size: 12px; margin-bottom: 6px;">Para voltar a exibi-lo a qualquer momento:</span>
+              <ul style="margin: 0; padding-left: 18px; color: #94a3b8; font-size: 12px; line-height: 1.6;">
+                <li>Pressione o atalho: <strong style="color: #f8fafc; font-family: ui-monospace, monospace;">Ctrl + Shift + B</strong></li>
+                <li>Ou execute o comando no console: <strong style="color: #f8fafc; font-family: ui-monospace, monospace;">Backtrack.show()</strong></li>
+              </ul>
+            </div>
+          </div>
+          <div class="backtrack-modal-footer">
+            <button type="button" class="backtrack-btn-secondary" id="btn-cancel-hide-modal">Cancelar</button>
+            <button type="button" class="backtrack-btn-primary" id="btn-confirm-hide-modal" style="background: #e11d48; border-color: #f43f5e;">
+              Ocultar agora
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   private updateDomValues(): void {
     if (!this.shadow) return;
 
@@ -1099,27 +1104,23 @@ export class BacktrackWidget {
 
     // Se o painel está aberto, atualiza texto e dot sem recriar o DOM
     if (this.isOpen && panel) {
-      const statusWrap = this.shadow.querySelector('.backtrack-viewer-status-wrap');
+      const statusWrap = this.shadow.querySelector('.backtrack-storage-wrap');
       if (statusWrap) {
         statusWrap.innerHTML = `
-          <span class="backtrack-status-dot ${this.isViewerOnline ? 'backtrack-status-online' : 'backtrack-status-offline'}"></span>
-          ${this.isViewerOnline ? 'Visualizador online' : 'Visualizador offline'}
-          <button
-            type="button"
-            class="backtrack-config-viewer-btn"
-            id="btn-config-viewer-url"
-            title="Configurar URL do Visualizador (ex: túnel Cloudflare). Atual: ${this.getViewerUrl()}"
-            aria-label="Configurar URL do Visualizador"
-          >
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M12 20h9" />
-              <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
-            </svg>
-          </button>
-          • ${this.formatBytes(this.health?.storageBytes ?? 0)}${this.health?.protectedStorageBytes ? ` (protegido: ${this.formatBytes(this.health.protectedStorageBytes)})` : ''}
+          <span>${this.formatBytes(this.health?.storageBytes ?? 0)}</span>
           ${this.health?.storageLimitExceeded ? '<span style="color: #f59e0b; margin-left: 2px; font-weight: bold; font-size: 11px;" title="Limite excedido por incidentes salvos">[!]</span>' : ''}
+          <span
+            class="backtrack-storage-tooltip-trigger"
+            title="${this.health?.protectedStorageBytes ? `${this.formatBytes(this.health.protectedStorageBytes)} protegidos. ` : ''}Gravações de incidentes salvos ficam protegidas para não serem apagadas pela reciclagem automática de memória (limite total de 50 MB no IndexedDB)."
+            aria-label="Informações sobre o armazenamento local e dados protegidos"
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="16" x2="12" y2="12" />
+              <line x1="12" y1="8" x2="12.01" y2="8" />
+            </svg>
+          </span>
         `;
-        this.attachConfigViewerListener();
       }
 
       const titleCount = this.shadow.getElementById('backtrack-saved-count-title');
@@ -1295,14 +1296,13 @@ export class BacktrackWidget {
     }
 
     if (this.isOpen) {
-      this.attachConfigViewerListener();
-
       this.shadow.getElementById('btn-close')?.addEventListener('click', () => {
         this.toggleOpen();
       });
 
       this.shadow.getElementById('btn-hide-widget')?.addEventListener('click', () => {
-        this.hide();
+        this.showHideConfirmModal = true;
+        this.render();
       });
 
       this.shadow.getElementById('btn-duration-60')?.addEventListener('click', () => {
@@ -1400,6 +1400,21 @@ export class BacktrackWidget {
         });
       }
 
+      if (this.showHideConfirmModal) {
+        this.shadow.getElementById('btn-close-hide-modal')?.addEventListener('click', () => {
+          this.showHideConfirmModal = false;
+          this.render();
+        });
+        this.shadow.getElementById('btn-cancel-hide-modal')?.addEventListener('click', () => {
+          this.showHideConfirmModal = false;
+          this.render();
+        });
+        this.shadow.getElementById('btn-confirm-hide-modal')?.addEventListener('click', () => {
+          this.showHideConfirmModal = false;
+          this.hide();
+        });
+      }
+
       this.shadow.querySelector('.backtrack-panel')?.addEventListener('click', (e) => {
         if (this.openMenuId) {
           const target = e.target as HTMLElement | null;
@@ -1412,33 +1427,4 @@ export class BacktrackWidget {
     }
   }
 
-  private attachConfigViewerListener(): void {
-    if (!this.shadow) return;
-    const btn = this.shadow.getElementById('btn-config-viewer-url');
-    if (btn) {
-      btn.onclick = (e) => {
-        e.stopPropagation();
-        const current = this.getViewerUrl();
-        const entered = prompt(
-          'URL do Backtrack Viewer (ex: https://meu-tunnel.trycloudflare.com ou http://localhost:5173):',
-          current
-        );
-        if (entered !== null) {
-          const trimmed = entered.trim();
-          try {
-            if (trimmed) {
-              localStorage.setItem('backtrack_viewer_url', trimmed);
-            } else {
-              localStorage.removeItem('backtrack_viewer_url');
-            }
-          } catch {
-            // Ignora erro de localStorage
-          }
-          this.isViewerOnline = false;
-          this.updateData();
-          this.render();
-        }
-      };
-    }
-  }
 }

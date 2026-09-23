@@ -336,6 +336,17 @@ describe('Backtrack v0.1.2 — Widget Nativo e Privacidade por Rota', () => {
       const btnHide = host?.shadowRoot?.getElementById('btn-hide-widget');
       expect(btnHide).not.toBeNull();
       btnHide?.click();
+
+      // Modal de confirmação com aviso do atalho e do comando no console
+      const hideModal = host?.shadowRoot?.querySelector('.backtrack-modal-card');
+      expect(hideModal).not.toBeNull();
+      expect(hideModal?.textContent).toContain('Ocultar Backtrack');
+      expect(hideModal?.textContent).toContain('Ctrl + Shift + B');
+      expect(hideModal?.textContent).toContain('Backtrack.show()');
+
+      const btnConfirmHide = host?.shadowRoot?.getElementById('btn-confirm-hide-modal') as HTMLButtonElement;
+      expect(btnConfirmHide).not.toBeNull();
+      btnConfirmHide?.click();
       expect(host?.style.display).toBe('none');
 
       // Testa atalho de teclado global Ctrl+Shift+B
