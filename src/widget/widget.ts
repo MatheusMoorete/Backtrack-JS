@@ -21,8 +21,10 @@ export class BacktrackWidget {
   private isCapturing = false;
   private incidents: IncidentSummary[] = [];
   private health: RecorderHealth | null = null;
-  private alertMessage: string | null = null;
   private isCustomDuration = false;
+  private toast: { message: string; type: 'success' | 'danger' } | null = null;
+  private banner: { message: string; type: 'success' | 'danger' } | null = null;
+  private toastTimer: ReturnType<typeof setTimeout> | null = null;
   private isHeaderMenuOpen = false;
   private selectedIncidentId: string | null = null;
 
@@ -97,6 +99,11 @@ export class BacktrackWidget {
           this.render();
           return;
         }
+        if (this.banner) {
+          e.preventDefault();
+          this.dismissBanner();
+          return;
+        }
         if (this.selectedIncidentId) {
           e.preventDefault();
           this.selectedIncidentId = null;
@@ -128,6 +135,10 @@ export class BacktrackWidget {
     if (this.pollTimer) {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
+    }
+    if (this.toastTimer) {
+      clearTimeout(this.toastTimer);
+      this.toastTimer = null;
     }
     if (this.container && this.container.parentNode) {
       this.container.parentNode.removeChild(this.container);
@@ -236,6 +247,30 @@ export class BacktrackWidget {
     }
   }
 
+  private showToast(message: string, type: 'success' | 'danger' = 'success', durationMs = 2800): void {
+    if (this.toastTimer) {
+      clearTimeout(this.toastTimer);
+      this.toastTimer = null;
+    }
+    this.toast = { message, type };
+    this.render();
+    this.toastTimer = setTimeout(() => {
+      this.toast = null;
+      this.toastTimer = null;
+      this.render();
+    }, durationMs);
+  }
+
+  private showBanner(message: string, type: 'success' | 'danger' = 'danger'): void {
+    this.banner = { message, type };
+    this.render();
+  }
+
+  private dismissBanner(): void {
+    this.banner = null;
+    this.render();
+  }
+
   private async handleCapture(): Promise<void> {
     if (this.isCapturing) return;
     this.isCapturing = true;
@@ -245,16 +280,12 @@ export class BacktrackWidget {
       const duration = this.selectedDurationSeconds > 0 ? this.selectedDurationSeconds : undefined;
       await this.recorder.capture('manual', duration);
       await this.updateData();
-      this.alertMessage = 'Gravação salva com sucesso!';
+      this.showToast('Gravação salva.', 'success');
     } catch (err) {
-      this.alertMessage = 'Falha ao salvar gravação retroativa.';
+      this.showBanner('Não foi possível salvar a gravação. Tente novamente.', 'danger');
     } finally {
       this.isCapturing = false;
       this.render();
-      setTimeout(() => {
-        this.alertMessage = null;
-        this.render();
-      }, 3500);
     }
   }
 
@@ -268,14 +299,9 @@ export class BacktrackWidget {
       await this.recorder.clear();
       this.selectedIncidentId = null;
       await this.updateData();
-      this.alertMessage = 'Gravações limpas com sucesso.';
-      this.render();
-      setTimeout(() => {
-        this.alertMessage = null;
-        this.render();
-      }, 3000);
+      this.showToast('Gravações limpas.', 'success');
     } catch (err) {
-      alert('Falha ao limpar gravações.');
+      this.showBanner('Não foi possível limpar as gravações.', 'danger');
     }
   }
 
@@ -284,7 +310,7 @@ export class BacktrackWidget {
       const artifact = await this.recorder.getArtifact(incidentId);
       this.openInViewer(artifact);
     } catch {
-      alert('Não foi possível carregar o artefato do incidente.');
+      this.showBanner('Não foi possível carregar o replay. Tente novamente.', 'danger');
     }
   }
 
@@ -326,11 +352,7 @@ export class BacktrackWidget {
       const isAi = this.downloadModalFormat === 'ai';
       const compress = this.downloadModalFormat === 'gzip';
       await this.recorder.exportIncident(id, { compress, aiOptimized: isAi });
-      this.alertMessage = isAi
-        ? 'Download do JSON para IA (.ai.json) iniciado!'
-        : compress
-        ? 'Download do arquivo compactado (.ffr.json.gz) iniciado!'
-        : 'Download do arquivo (.ffr.json) iniciado!';
+      this.showToast('Download iniciado.', 'success');
     } catch {
       this.downloadModalError = 'Falha ao exportar incidente.';
       this.isDownloading = false;
@@ -344,11 +366,6 @@ export class BacktrackWidget {
     this.downloadModalFormat = null;
     this.downloadModalError = null;
     this.render();
-
-    setTimeout(() => {
-      this.alertMessage = null;
-      this.render();
-    }, 3500);
   }
 
   private handleCopyMarkdown(incidentId: string): void {
@@ -441,11 +458,9 @@ export class BacktrackWidget {
       }
 
       if (copied) {
-        this.alertMessage = this.exportModalIncludeLink
-          ? 'Markdown para debug copiado com link do replay!'
-          : 'Markdown para debug copiado!';
+        this.showToast(this.exportModalIncludeLink ? 'Link copiado.' : 'Markdown copiado.', 'success');
       } else {
-        this.alertMessage = 'Área de transferência indisponível.';
+        this.showToast('Área de transferência indisponível.', 'danger');
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -467,11 +482,6 @@ export class BacktrackWidget {
     this.exportModalIncidentId = null;
     this.exportModalError = null;
     this.render();
-
-    setTimeout(() => {
-      this.alertMessage = null;
-      this.render();
-    }, 3500);
   }
 
   private async handleShareGist(incidentId: string): Promise<void> {
@@ -492,18 +502,39 @@ export class BacktrackWidget {
       }
     }
 
-    this.alertMessage = 'Enviando incidente para o GitHub Gist...';
-    this.render();
-
     try {
       const artifact = await this.recorder.getArtifact(incidentId);
       const result = await uploadArtifactToGist(artifact, token);
       const viewerUrl = this.getViewerUrl();
       const shareableUrl = `${viewerUrl}/?gist=${result.gistId}`;
 
-      if (typeof navigator !== 'undefined' && navigator.clipboard) {
-        await navigator.clipboard.writeText(shareableUrl);
-        this.alertMessage = 'Link compartilhado copiado para a área de transferência!';
+      let copied = false;
+      if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+        try {
+          await navigator.clipboard.writeText(shareableUrl);
+          copied = true;
+        } catch {
+          // Fallback via textarea
+        }
+      }
+      if (!copied && typeof document !== 'undefined') {
+        try {
+          const textarea = document.createElement('textarea');
+          textarea.value = shareableUrl;
+          textarea.style.position = 'fixed';
+          textarea.style.opacity = '0';
+          document.body.appendChild(textarea);
+          textarea.focus();
+          textarea.select();
+          copied = document.execCommand('copy');
+          document.body.removeChild(textarea);
+        } catch {
+          copied = false;
+        }
+      }
+
+      if (copied) {
+        this.showToast('Link copiado.', 'success');
       } else {
         prompt('Link compartilhado gerado com sucesso:', shareableUrl);
       }
@@ -516,14 +547,7 @@ export class BacktrackWidget {
           // Ignora
         }
       }
-      alert(`Falha ao compartilhar replay: ${msg}`);
-      this.alertMessage = 'Falha ao gerar link compartilhado.';
-    } finally {
-      this.render();
-      setTimeout(() => {
-        this.alertMessage = null;
-        this.render();
-      }, 4000);
+      this.showBanner('Não foi possível gerar o link. Tente novamente.', 'danger');
     }
   }
 
@@ -542,7 +566,6 @@ export class BacktrackWidget {
       try {
         this.isCapturing = true;
         this.isOpen = true;
-        this.alertMessage = 'Gravando incidente com anotação visual...';
         this.render();
 
         const reason = result.notes?.trim()
@@ -554,16 +577,12 @@ export class BacktrackWidget {
           notes: result.notes
         });
         await this.updateData();
-        this.alertMessage = 'Incidente com anotação visual gravado com sucesso!';
+        this.showToast('Gravação salva.', 'success');
       } catch (err) {
-        this.alertMessage = 'Falha ao salvar incidente com anotação.';
+        this.showBanner('Não foi possível salvar a gravação com anotação.', 'danger');
       } finally {
         this.isCapturing = false;
         this.render();
-        setTimeout(() => {
-          this.alertMessage = null;
-          this.render();
-        }, 3500);
       }
     });
   }
@@ -580,9 +599,9 @@ export class BacktrackWidget {
         this.selectedIncidentId = null;
       }
       await this.updateData();
-      this.render();
+      this.showToast('Gravação excluída.', 'success');
     } catch {
-      alert('Falha ao excluir incidente.');
+      this.showBanner('Não foi possível excluir a gravação.', 'danger');
     }
   }
 
@@ -590,7 +609,7 @@ export class BacktrackWidget {
     const viewerUrl = this.getViewerUrl();
     const win = window.open(viewerUrl, 'backtrack_viewer');
     if (!win) {
-      alert('Pop-up bloqueado. Permita pop-ups para abrir o visualizador.');
+      this.showBanner('Pop-up bloqueado. Permita pop-ups no navegador.', 'danger');
       return;
     }
 
@@ -681,6 +700,53 @@ export class BacktrackWidget {
       return 'Falha na requisição de rede';
     }
     return reason;
+  }
+
+  private renderBannerHtml(): string {
+    if (!this.banner) return '';
+    const isSuccess = this.banner.type === 'success';
+    return `
+      <div class="backtrack-banner backtrack-banner-${this.banner.type}" role="alert">
+        <span class="backtrack-banner-icon">
+          ${
+            isSuccess
+              ? `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>`
+              : `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>`
+          }
+        </span>
+        <span class="backtrack-banner-text">${this.banner.message}</span>
+        <button
+          type="button"
+          class="backtrack-banner-close"
+          id="btn-dismiss-banner"
+          aria-label="Fechar aviso"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </div>
+    `;
+  }
+
+  private renderToastHtml(): string {
+    if (!this.toast) return '';
+    const isSuccess = this.toast.type === 'success';
+    return `
+      <div class="backtrack-toast-wrap">
+        <div class="backtrack-toast backtrack-toast-${this.toast.type}" role="status" aria-live="polite">
+          <span class="backtrack-toast-icon">
+            ${
+              isSuccess
+                ? `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>`
+                : `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>`
+            }
+          </span>
+          <span class="backtrack-toast-text">${this.toast.message}</span>
+        </div>
+      </div>
+    `;
   }
 
   private render(): void {
@@ -793,7 +859,7 @@ export class BacktrackWidget {
 
             <!-- Body -->
             <div class="backtrack-panel-body">
-              ${this.alertMessage ? `<div class="backtrack-alert">${this.alertMessage}</div>` : ''}
+              ${this.renderBannerHtml()}
 
               ${
                 this.selectedIncidentId
@@ -928,6 +994,9 @@ export class BacktrackWidget {
             ${this.exportModalIncidentId ? this.renderExportModal() : ''}
             ${this.downloadModalIncidentId ? this.renderDownloadModal() : ''}
             ${this.showHideConfirmModal ? this.renderHideConfirmModal() : ''}
+
+            <!-- Toast Flutuante -->
+            ${this.renderToastHtml()}
           </div>
         `
             : ''
@@ -1078,7 +1147,12 @@ export class BacktrackWidget {
               </svg>
               <span>Markdown para debug</span>
             </div>
-            <button type="button" class="backtrack-modal-close" id="btn-close-export-modal" aria-label="Fechar">✕</button>
+            <button type="button" class="backtrack-modal-close" id="btn-close-export-modal" aria-label="Fechar">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
           </div>
           <div class="backtrack-modal-body">
             <label class="backtrack-modal-checkbox-label">
@@ -1114,7 +1188,12 @@ export class BacktrackWidget {
               </svg>
               <span>Baixar Arquivo de Gravação</span>
             </div>
-            <button type="button" class="backtrack-modal-close" id="btn-close-download-modal" aria-label="Fechar">✕</button>
+            <button type="button" class="backtrack-modal-close" id="btn-close-download-modal" aria-label="Fechar">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
           </div>
           <div class="backtrack-modal-body">
             <label class="backtrack-modal-radio-label ${this.downloadModalFormat === 'ai' ? 'is-selected' : ''}">
@@ -1163,7 +1242,12 @@ export class BacktrackWidget {
               </svg>
               <span>Ocultar Backtrack</span>
             </div>
-            <button type="button" class="backtrack-modal-close" id="btn-close-hide-modal" aria-label="Fechar">✕</button>
+            <button type="button" class="backtrack-modal-close" id="btn-close-hide-modal" aria-label="Fechar">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
           </div>
           <div class="backtrack-modal-body">
             <p style="margin: 0 0 12px 0; color: #cbd5e1; font-size: 13px; line-height: 1.5;">
@@ -1384,6 +1468,10 @@ export class BacktrackWidget {
     if (this.isOpen) {
       this.shadow.getElementById('btn-close')?.addEventListener('click', () => {
         this.toggleOpen();
+      });
+
+      this.shadow.getElementById('btn-dismiss-banner')?.addEventListener('click', () => {
+        this.dismissBanner();
       });
 
       this.shadow.getElementById('btn-header-menu')?.addEventListener('click', (e) => {

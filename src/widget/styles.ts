@@ -17,6 +17,12 @@ export const WIDGET_CSS = `
   --bt-accent-hover: #1d4ed8;
   --bt-accent-muted: rgba(37, 99, 235, 0.16);
   --bt-status-online: #22c55e;
+  --bt-bg-success: rgba(34, 197, 94, 0.12);
+  --bt-text-success: #22c55e;
+  --bt-border-success: rgba(34, 197, 94, 0.4);
+  --bt-bg-danger: rgba(239, 68, 68, 0.12);
+  --bt-text-danger: #ef4444;
+  --bt-border-danger: rgba(239, 68, 68, 0.4);
   --bt-radius-lg: 12px;
   --bt-radius-md: 8px;
   --bt-radius-sm: 6px;
@@ -293,16 +299,143 @@ export const WIDGET_CSS = `
   background-color: #475569;
 }
 
-/* Alertas de Feedback */
-.backtrack-alert {
-  background-color: rgba(16, 185, 129, 0.12);
-  border: 1px solid rgba(16, 185, 129, 0.3);
-  border-radius: var(--bt-radius-sm);
-  padding: 6px 10px;
-  margin-bottom: 10px;
-  font-size: 11px;
+/* Banner Inline (Sucesso / Falha) */
+.backtrack-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: var(--bt-radius-md);
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  line-height: 1.4;
+  animation: backtrackFadeIn 0.15s ease-out;
+}
+
+.backtrack-banner-success {
+  background-color: var(--bt-bg-success);
+  color: var(--bt-text-success);
+}
+
+.backtrack-banner-danger {
+  background-color: var(--bt-bg-danger);
+  color: var(--bt-text-danger);
+}
+
+.backtrack-banner-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.backtrack-banner-success .backtrack-banner-icon {
+  color: var(--bt-text-success);
+}
+
+.backtrack-banner-danger .backtrack-banner-icon {
+  color: var(--bt-text-danger);
+}
+
+.backtrack-banner-text {
+  flex: 1;
   font-weight: 500;
-  color: #34d399;
+  font-size: 13px;
+}
+
+.backtrack-banner-close {
+  background: transparent;
+  border: none;
+  padding: 2px 4px;
+  cursor: pointer;
+  opacity: 0.7;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  transition: opacity 0.12s ease;
+  outline: none;
+}
+
+.backtrack-banner-success .backtrack-banner-close {
+  color: var(--bt-text-success);
+}
+
+.backtrack-banner-danger .backtrack-banner-close {
+  color: var(--bt-text-danger);
+}
+
+.backtrack-banner-close:hover {
+  opacity: 1;
+}
+
+/* Toast Flutuante (Sobreposto e Temporário) */
+.backtrack-toast-wrap {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  pointer-events: none;
+  width: max-content;
+  max-width: calc(100% - 28px);
+  animation: backtrackToastIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes backtrackToastIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 6px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+.backtrack-toast {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background-color: var(--bt-surface-bg);
+  border-radius: var(--bt-radius-md);
+  padding: 8px 14px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.65);
+  pointer-events: auto;
+}
+
+.backtrack-toast-success {
+  border: 1px solid var(--bt-border-success);
+}
+
+.backtrack-toast-danger {
+  border: 1px solid var(--bt-border-danger);
+}
+
+.backtrack-toast-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.backtrack-toast-success .backtrack-toast-icon {
+  color: var(--bt-text-success);
+}
+
+.backtrack-toast-danger .backtrack-toast-icon {
+  color: var(--bt-text-danger);
+}
+
+.backtrack-toast-text {
+  color: var(--bt-text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
 }
 
 /* 2. Seção de Controles de Gravação */

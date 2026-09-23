@@ -435,5 +435,78 @@ describe('Backtrack v0.1.2 — Widget Nativo e Privacidade por Rota', () => {
       widget.unmount();
       recorder.stop();
     });
+
+    it('exibe e auto-dispensa toast flutuante sem botão fechar', async () => {
+      const recorder = new FlightRecorderImpl({}, db);
+      await recorder.start();
+      const widget = new BacktrackWidget(recorder);
+      widget.mount();
+
+      const host = document.getElementById('__backtrack_widget_host__');
+      host?.shadowRoot?.getElementById('btn-launcher')?.click();
+
+      // Aciona showToast
+      (widget as unknown as { showToast: (msg: string, type: 'success' | 'danger', dur?: number) => void }).showToast(
+        'Link copiado.',
+        'success',
+        100
+      );
+
+      const toast = host?.shadowRoot?.querySelector('.backtrack-toast.backtrack-toast-success');
+      expect(toast).not.toBeNull();
+      expect(toast?.textContent).toContain('Link copiado.');
+      // Toast não deve ter botão de fechar
+      expect(toast?.querySelector('button')).toBeNull();
+
+      // Aguarda expiração do timer do toast
+      await new Promise((r) => setTimeout(r, 150));
+      expect(host?.shadowRoot?.querySelector('.backtrack-toast')).toBeNull();
+
+      widget.unmount();
+      recorder.stop();
+    });
+
+    it('exibe banner de erro com botão fechar e permite dispensar via clique e tecla Escape', async () => {
+      const recorder = new FlightRecorderImpl({}, db);
+      await recorder.start();
+      const widget = new BacktrackWidget(recorder);
+      widget.mount();
+
+      const host = document.getElementById('__backtrack_widget_host__');
+      host?.shadowRoot?.getElementById('btn-launcher')?.click();
+
+      // Aciona showBanner
+      (widget as unknown as { showBanner: (msg: string, type: 'success' | 'danger') => void }).showBanner(
+        'Não foi possível gerar o link. Tente novamente.',
+        'danger'
+      );
+
+      const banner = host?.shadowRoot?.querySelector('.backtrack-banner.backtrack-banner-danger');
+      expect(banner).not.toBeNull();
+      expect(banner?.textContent).toContain('Não foi possível gerar o link. Tente novamente.');
+
+      const closeBtn = banner?.querySelector('#btn-dismiss-banner') as HTMLButtonElement;
+      expect(closeBtn).not.toBeNull();
+      expect(closeBtn?.getAttribute('aria-label')).toBe('Fechar aviso');
+
+      // Dispensa via clique no botão fechar
+      closeBtn?.click();
+      expect(host?.shadowRoot?.querySelector('.backtrack-banner')).toBeNull();
+
+      // Testa dispensa via Escape
+      (widget as unknown as { showBanner: (msg: string, type: 'success' | 'danger') => void }).showBanner(
+        'Falha ao salvar gravação.',
+        'danger'
+      );
+      expect(host?.shadowRoot?.querySelector('.backtrack-banner')).not.toBeNull();
+
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+      expect(host?.shadowRoot?.querySelector('.backtrack-banner')).toBeNull();
+      // O painel continua aberto após dispensar o banner
+      expect(host?.shadowRoot?.querySelector('.backtrack-panel')).not.toBeNull();
+
+      widget.unmount();
+      recorder.stop();
+    });
   });
 });
