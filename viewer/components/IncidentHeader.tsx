@@ -36,6 +36,8 @@ export const IncidentHeader: React.FC<IncidentHeaderProps> = ({ artifact, onRese
   const [shareTokenInput, setShareTokenInput] = useState('');
   const [showShareTokenPrompt, setShowShareTokenPrompt] = useState(false);
   const [downloadSuccess, setDownloadSuccess] = useState(false);
+  const [downloadFormat, setDownloadFormat] = useState<'gzip' | 'uncompressed' | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const [includeLink, setIncludeLink] = useState(true);
   const [isExporting, setIsExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -153,26 +155,6 @@ export const IncidentHeader: React.FC<IncidentHeaderProps> = ({ artifact, onRese
     }
   };
 
-  const handleExport = async () => {
-    try {
-      const compressed = await compressArtifact(artifact);
-      const blob = new Blob([compressed as unknown as BlobPart], { type: 'application/gzip' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${incident.id}.ffr.json.gz`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch {
-      const blob = new Blob([JSON.stringify(artifact, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${incident.id}.ffr.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-    }
-  };
 
   const handleGenerateShareLink = async () => {
     setIsGeneratingShareLink(true);
@@ -238,9 +220,46 @@ export const IncidentHeader: React.FC<IncidentHeaderProps> = ({ artifact, onRese
   };
 
   const handleDownloadFile = async () => {
-    await handleExport();
-    setDownloadSuccess(true);
-    setTimeout(() => setDownloadSuccess(false), 2500);
+    if (!downloadFormat) {
+      setDownloadError('Escolha uma opção antes de baixar');
+      return;
+    }
+    setDownloadError(null);
+
+    try {
+      if (downloadFormat === 'gzip') {
+        try {
+          const compressed = await compressArtifact(artifact);
+          const blob = new Blob([compressed as unknown as BlobPart], { type: 'application/gzip' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `${incident.id}.ffr.json.gz`;
+          a.click();
+          URL.revokeObjectURL(url);
+        } catch {
+          const blob = new Blob([JSON.stringify(artifact, null, 2)], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `${incident.id}.ffr.json`;
+          a.click();
+          URL.revokeObjectURL(url);
+        }
+      } else {
+        const blob = new Blob([JSON.stringify(artifact, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${incident.id}.ffr.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+      setDownloadSuccess(true);
+      setTimeout(() => setDownloadSuccess(false), 2500);
+    } catch {
+      setDownloadError('Falha ao baixar arquivo de gravação.');
+    }
   };
 
   return (
@@ -315,6 +334,8 @@ export const IncidentHeader: React.FC<IncidentHeaderProps> = ({ artifact, onRese
             className="btn-secondary"
             onClick={() => {
               setShareError(null);
+              setDownloadFormat(null);
+              setDownloadError(null);
               setShowShareModal(true);
             }}
             title="Compartilhar gravação via link ou baixar arquivo"
@@ -589,8 +610,93 @@ export const IncidentHeader: React.FC<IncidentHeaderProps> = ({ artifact, onRese
                   <strong style={{ color: '#f8fafc', fontSize: '13px' }}>Baixar Arquivo da Gravação</strong>
                 </div>
                 <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8', lineHeight: 1.4 }}>
-                  Salva o arquivo compactado (.ffr.json.gz) no seu computador com compressão Gzip nativa (100% fiel).
+                  Escolha o formato desejado para salvar a gravação no seu computador:
                 </p>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '2px' }}>
+                  <label
+                    style={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: '10px',
+                      padding: '10px 12px',
+                      border: downloadFormat === 'gzip' ? '1px solid #2563eb' : '1px solid #334155',
+                      borderRadius: '6px',
+                      background: downloadFormat === 'gzip' ? 'rgba(37, 99, 235, 0.1)' : '#0f172a',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                    onClick={() => {
+                      setDownloadFormat('gzip');
+                      setDownloadError(null);
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="viewer-download-format"
+                      value="gzip"
+                      checked={downloadFormat === 'gzip'}
+                      onChange={() => {
+                        setDownloadFormat('gzip');
+                        setDownloadError(null);
+                      }}
+                      style={{ marginTop: '2px', cursor: 'pointer', accentColor: '#2563eb' }}
+                    />
+                    <div>
+                      <span style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#f1f5f9' }}>
+                        Arquivo compactado (.ffr.json.gz) — Menor tamanho
+                      </span>
+                      <p style={{ margin: '3px 0 0 0', fontSize: '11px', color: '#94a3b8', lineHeight: 1.35 }}>
+                        Compactado com Gzip (~90% menor, ~100 KB). Ideal para compartilhamento rápido no Slack, Jira ou WhatsApp.
+                      </p>
+                    </div>
+                  </label>
+
+                  <label
+                    style={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: '10px',
+                      padding: '10px 12px',
+                      border: downloadFormat === 'uncompressed' ? '1px solid #2563eb' : '1px solid #334155',
+                      borderRadius: '6px',
+                      background: downloadFormat === 'uncompressed' ? 'rgba(37, 99, 235, 0.1)' : '#0f172a',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                    onClick={() => {
+                      setDownloadFormat('uncompressed');
+                      setDownloadError(null);
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="viewer-download-format"
+                      value="uncompressed"
+                      checked={downloadFormat === 'uncompressed'}
+                      onChange={() => {
+                        setDownloadFormat('uncompressed');
+                        setDownloadError(null);
+                      }}
+                      style={{ marginTop: '2px', cursor: 'pointer', accentColor: '#2563eb' }}
+                    />
+                    <div>
+                      <span style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#f1f5f9' }}>
+                        Arquivo completo (.ffr.json) — Maior tamanho
+                      </span>
+                      <p style={{ margin: '3px 0 0 0', fontSize: '11px', color: '#94a3b8', lineHeight: 1.35 }}>
+                        JSON descompactado (~1 MB+). Útil para leitura e inspeção direta de texto bruto.
+                      </p>
+                    </div>
+                  </label>
+                </div>
+
+                {downloadError && (
+                  <div style={{ color: '#fca5a5', fontSize: '11px', background: 'rgba(239, 68, 68, 0.15)', padding: '6px 10px', borderRadius: '4px', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
+                    {downloadError}
+                  </div>
+                )}
+
                 <button
                   type="button"
                   className="btn-secondary"
@@ -602,7 +708,7 @@ export const IncidentHeader: React.FC<IncidentHeaderProps> = ({ artifact, onRese
                     <polyline points="7 10 12 15 17 10" />
                     <line x1="12" y1="15" x2="12" y2="3" />
                   </svg>
-                  <span>{downloadSuccess ? '✓ Download Iniciado!' : 'Baixar Arquivo (.ffr.json.gz)'}</span>
+                  <span>{downloadSuccess ? '✓ Download Iniciado!' : 'Baixar Arquivo'}</span>
                 </button>
               </div>
             </div>

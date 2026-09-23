@@ -660,23 +660,22 @@ export const WIDGET_CSS = `
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: rgba(0, 0, 0, 0.75);
+  background-color: #0b0f17;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  flex-direction: column;
   z-index: 1000;
   border-radius: 8px;
-  padding: 16px;
-  backdrop-filter: blur(2px);
+  padding: 0;
+  overflow: hidden;
 }
 
 .backtrack-modal-card {
   width: 100%;
-  max-width: 320px;
-  background-color: #0f172a;
-  border: 1px solid #334155;
+  height: 100%;
+  max-width: 100%;
+  background-color: #0b0f17;
+  border: none;
   border-radius: 8px;
-  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.6);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -719,6 +718,8 @@ export const WIDGET_CSS = `
   display: flex;
   flex-direction: column;
   gap: 10px;
+  flex: 1;
+  overflow-y: auto;
 }
 
 .backtrack-modal-checkbox-label {
@@ -866,9 +867,9 @@ export const WIDGET_CSS = `
   }
 
   .backtrack-modal-card {
-    width: calc(100vw - 20px) !important;
-    max-width: calc(100vw - 20px) !important;
-    margin: 10px !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
   }
 
   .backtrack-modal-body {
