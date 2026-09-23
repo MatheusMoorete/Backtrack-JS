@@ -994,9 +994,10 @@ export class BacktrackWidget {
 
     return `
       <div class="backtrack-detail-view">
-        <div class="backtrack-detail-header-row">
+        <!-- 1. Botão Voltar -->
+        <div class="backtrack-detail-back-row">
           <button type="button" class="backtrack-btn-back" id="btn-back-to-list" aria-label="Voltar para a lista">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <line x1="19" y1="12" x2="5" y2="12" />
               <polyline points="12 19 5 12 12 5" />
             </svg>
@@ -1004,48 +1005,59 @@ export class BacktrackWidget {
           </button>
         </div>
 
+        <!-- 2. Card de resumo da sessão -->
         <div class="backtrack-detail-card">
           <div class="backtrack-detail-title">${title}</div>
-          <div class="backtrack-detail-meta">${dateStr} · ${durationSec}s · ID: ${inc.id.substring(0, 14)}...</div>
+          <div class="backtrack-detail-meta">${dateStr} · ${durationSec}s · ${inc.id.length > 20 ? inc.id.substring(0, 18) + '...' : inc.id}</div>
         </div>
 
-        <div class="backtrack-detail-actions">
-          <button type="button" class="backtrack-detail-action-btn backtrack-detail-btn-primary" data-view-id="${inc.id}">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <polygon points="5 3 19 12 5 21 5 3" />
-            </svg>
-            <span>Visualizar Replay</span>
-          </button>
+        <!-- 3. CTA principal — Visualizar replay -->
+        <button type="button" class="backtrack-btn-cta-replay backtrack-detail-btn-primary" data-view-id="${inc.id}">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polygon points="5 3 19 12 5 21 5 3" />
+          </svg>
+          <span>Visualizar replay</span>
+        </button>
 
-          <button type="button" class="backtrack-detail-action-btn backtrack-detail-btn-secondary" data-copy-id="${inc.id}">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-            </svg>
-            <span>Markdown para debug</span>
-          </button>
+        <!-- 4. Grupo "Exportar" (ações agrupadas) -->
+        <div class="backtrack-export-section">
+          <div class="backtrack-export-label">EXPORTAR</div>
+          <div class="backtrack-export-group">
+            <button type="button" class="backtrack-export-item" data-copy-id="${inc.id}">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </svg>
+              <span>Markdown para debug</span>
+            </button>
 
-          <button type="button" class="backtrack-detail-action-btn backtrack-detail-btn-secondary" data-download-id="${inc.id}">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-              <polyline points="7 10 12 15 17 10" />
-              <line x1="12" y1="15" x2="12" y2="3" />
-            </svg>
-            <span>Baixar arquivo de gravação</span>
-          </button>
+            <button type="button" class="backtrack-export-item" data-download-id="${inc.id}">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+              <span>Baixar arquivo de gravação</span>
+            </button>
 
-          <button type="button" class="backtrack-detail-action-btn backtrack-detail-btn-secondary" data-share-gist-id="${inc.id}">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-            </svg>
-            <span>Gerar Link (Gist)</span>
-          </button>
+            <button type="button" class="backtrack-export-item" data-share-gist-id="${inc.id}">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+              </svg>
+              <span>Gerar link para compartilhar</span>
+            </button>
+          </div>
+        </div>
 
-          <button type="button" class="backtrack-detail-action-btn backtrack-detail-btn-danger" data-delete-id="${inc.id}">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
+        <!-- 5. Ação destrutiva — Excluir gravação -->
+        <div class="backtrack-destructive-section">
+          <button type="button" class="backtrack-btn-delete-ghost" data-delete-id="${inc.id}">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polyline points="3 6 5 6 21 6" />
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+              <line x1="10" y1="11" x2="10" y2="17" />
+              <line x1="14" y1="11" x2="14" y2="17" />
             </svg>
             <span>Excluir gravação</span>
           </button>

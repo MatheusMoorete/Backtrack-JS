@@ -587,32 +587,31 @@ export const WIDGET_CSS = `
 .backtrack-detail-view {
   display: flex;
   flex-direction: column;
-  gap: 12px;
 }
 
-.backtrack-detail-header-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.backtrack-detail-back-row {
+  margin-bottom: 14px;
 }
 
 .backtrack-btn-back {
   background: transparent;
   border: 1px solid var(--bt-border);
   border-radius: var(--bt-radius-sm);
-  padding: 4px 8px;
-  font-size: 11px;
-  color: var(--bt-text-muted);
+  padding: 5px 10px;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--bt-text-primary);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  transition: color 0.1s ease, border-color 0.1s ease;
+  gap: 6px;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+  outline: none;
 }
 
 .backtrack-btn-back:hover {
-  color: #ffffff;
-  border-color: #475569;
+  background-color: var(--bt-surface-elevated);
+  border-color: #3b4252;
 }
 
 .backtrack-detail-card {
@@ -620,73 +619,137 @@ export const WIDGET_CSS = `
   border: 1px solid var(--bt-border);
   border-radius: var(--bt-radius-md);
   padding: 10px 12px;
+  margin-bottom: 18px;
 }
 
 .backtrack-detail-title {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 500;
   color: var(--bt-text-primary);
   margin-bottom: 4px;
+  line-height: 1.3;
 }
 
 .backtrack-detail-meta {
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--bt-text-muted);
   font-family: var(--bt-font-mono);
+  letter-spacing: -0.01em;
 }
 
-.backtrack-detail-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.backtrack-detail-action-btn {
+/* CTA principal — Visualizar replay */
+.backtrack-btn-cta-replay {
   width: 100%;
-  padding: 8px 12px;
-  border-radius: var(--bt-radius-sm);
-  font-size: 12px;
+  height: 40px;
+  background-color: var(--bt-accent);
+  color: #ffffff;
+  border: 1px solid #3b82f6;
+  border-radius: var(--bt-radius-md);
+  font-size: 13px;
   font-weight: 500;
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+  gap: 6px;
   cursor: pointer;
-  transition: background-color 0.1s ease, border-color 0.1s ease;
+  transition: background-color 0.12s ease;
+  user-select: none;
   outline: none;
+  margin-bottom: 18px;
 }
 
-.backtrack-detail-btn-primary {
-  background-color: var(--bt-accent);
-  border: 1px solid #3b82f6;
-  color: #ffffff;
-}
-
-.backtrack-detail-btn-primary:hover {
+.backtrack-btn-cta-replay:hover {
   background-color: var(--bt-accent-hover);
 }
 
-.backtrack-detail-btn-secondary {
-  background-color: var(--bt-surface-card);
+/* Grupo "Exportar" (ações agrupadas) */
+.backtrack-export-section {
+  margin-bottom: 18px;
+}
+
+.backtrack-export-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--bt-text-muted);
+  margin-bottom: 8px;
+}
+
+.backtrack-export-group {
   border: 1px solid var(--bt-border);
+  border-radius: var(--bt-radius-md);
+  overflow: hidden;
+  background-color: transparent;
+}
+
+.backtrack-export-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--bt-border);
+  color: var(--bt-text-primary);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+  outline: none;
+}
+
+.backtrack-export-item:last-child {
+  border-bottom: none;
+}
+
+.backtrack-export-item svg {
+  color: var(--bt-text-muted);
+  flex-shrink: 0;
+  transition: color 0.12s ease;
+}
+
+.backtrack-export-item:hover {
+  background-color: var(--bt-surface-elevated);
+}
+
+.backtrack-export-item:hover svg {
   color: var(--bt-text-primary);
 }
 
-.backtrack-detail-btn-secondary:hover {
-  background-color: var(--bt-surface-elevated);
-  border-color: #475569;
-  color: #ffffff;
+/* Ação destrutiva — Excluir gravação */
+.backtrack-destructive-section {
+  border-top: 1px solid var(--bt-border);
+  padding-top: 12px;
 }
 
-.backtrack-detail-btn-danger {
-  background-color: transparent;
-  border: 1px solid rgba(239, 68, 68, 0.3);
-  color: #f87171;
+.backtrack-btn-delete-ghost {
+  width: 100%;
+  background: transparent;
+  border: none;
+  padding: 6px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #ef4444;
+  font-size: 13px;
+  font-weight: 400;
+  cursor: pointer;
+  text-align: left;
+  transition: opacity 0.12s ease;
+  outline: none;
 }
 
-.backtrack-detail-btn-danger:hover {
-  background-color: rgba(239, 68, 68, 0.12);
-  border-color: #ef4444;
+.backtrack-btn-delete-ghost:hover {
+  opacity: 0.8;
 }
+
+.backtrack-btn-delete-ghost svg {
+  color: #ef4444;
+  flex-shrink: 0;
+}
+
 
 /* Modais de Confirmação (Export, Download, Hide) */
 .backtrack-modal-overlay {

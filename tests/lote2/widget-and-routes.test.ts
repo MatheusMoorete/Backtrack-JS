@@ -116,7 +116,7 @@ describe('Backtrack v0.1.2 — Widget Nativo e Privacidade por Rota', () => {
 
       const viewBtn = host?.shadowRoot?.querySelector('.backtrack-detail-btn-primary');
       expect(viewBtn).not.toBeNull();
-      expect(viewBtn?.textContent?.trim()).toContain('Visualizar Replay');
+      expect(viewBtn?.textContent?.trim().toLowerCase()).toContain('visualizar replay');
 
       // Itens de ação da tela de detalhes
       const downloadBtn = host?.shadowRoot?.querySelector('[data-download-id]');
