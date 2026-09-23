@@ -253,22 +253,57 @@ export class BacktrackWidget {
       this.toastTimer = null;
     }
     this.toast = { message, type };
-    this.render();
+
+    const panel = this.shadow?.querySelector('.backtrack-panel');
+    if (panel) {
+      const existingToast = panel.querySelector('.backtrack-toast-wrap');
+      if (existingToast) existingToast.remove();
+
+      const temp = document.createElement('div');
+      temp.innerHTML = this.renderToastHtml();
+      if (temp.firstElementChild) {
+        panel.appendChild(temp.firstElementChild);
+      }
+    } else {
+      this.render();
+    }
+
     this.toastTimer = setTimeout(() => {
       this.toast = null;
       this.toastTimer = null;
-      this.render();
+      const currentToast = this.shadow?.querySelector('.backtrack-toast-wrap');
+      if (currentToast) {
+        currentToast.remove();
+      }
     }, durationMs);
   }
 
   private showBanner(message: string, type: 'success' | 'danger' = 'danger'): void {
     this.banner = { message, type };
-    this.render();
+    const body = this.shadow?.querySelector('.backtrack-panel-body');
+    if (body) {
+      const existingBanner = body.querySelector('.backtrack-banner');
+      if (existingBanner) existingBanner.remove();
+
+      const temp = document.createElement('div');
+      temp.innerHTML = this.renderBannerHtml();
+      if (temp.firstElementChild) {
+        body.insertBefore(temp.firstElementChild, body.firstChild);
+        this.shadow?.getElementById('btn-dismiss-banner')?.addEventListener('click', () => {
+          this.dismissBanner();
+        });
+      }
+    } else {
+      this.render();
+    }
   }
 
   private dismissBanner(): void {
     this.banner = null;
-    this.render();
+    const bannerEl = this.shadow?.querySelector('.backtrack-banner');
+    if (bannerEl) {
+      bannerEl.remove();
+    }
   }
 
   private async handleCapture(): Promise<void> {
@@ -749,43 +784,29 @@ export class BacktrackWidget {
     `;
   }
 
-  private render(): void {
-    if (!this.shadow) return;
+  private renderLauncherHtml(statusClass: string, incidentCount: number): string {
+    return `
+      <button
+        type="button"
+        class="backtrack-launcher-btn"
+        id="btn-launcher"
+        title="Backtrack — Gravação e Depuração de Sessão"
+        aria-label="Abrir painel do Backtrack"
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+          <polyline points="3 3 3 8 8 8" />
+          <polygon points="10 9 15 12 10 15 10 9" fill="currentColor" stroke="none" />
+        </svg>
+        <span class="backtrack-launcher-status-dot ${statusClass}"></span>
+        ${incidentCount > 0 ? `<span class="backtrack-incident-badge-count">${incidentCount}</span>` : ''}
+      </button>
+    `;
+  }
 
-    const statusClass =
-      this.health?.state === 'recording'
-        ? 'backtrack-status-recording'
-        : this.health?.state === 'degraded'
-        ? 'backtrack-status-degraded'
-        : 'backtrack-status-idle';
-
+  private renderPanelContentHtml(): string {
     const incidentCount = this.incidents.length;
-
-    this.shadow.innerHTML = `
-      <style>${WIDGET_CSS}</style>
-      <div class="backtrack-root">
-        <!-- Launcher Button -->
-        <button
-          type="button"
-          class="backtrack-launcher-btn"
-          id="btn-launcher"
-          title="Backtrack — Gravação e Depuração de Sessão"
-          aria-label="Abrir painel do Backtrack"
-        >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-            <polyline points="3 3 3 8 8 8" />
-            <polygon points="10 9 15 12 10 15 10 9" fill="currentColor" stroke="none" />
-          </svg>
-          <span class="backtrack-launcher-status-dot ${statusClass}"></span>
-          ${incidentCount > 0 ? `<span class="backtrack-incident-badge-count">${incidentCount}</span>` : ''}
-        </button>
-
-        <!-- Slide-over Drawer Panel -->
-        ${
-          this.isOpen
-            ? `
-          <div class="backtrack-panel" role="dialog" aria-labelledby="backtrack-title">
+    return `
             <!-- 1. Header -->
             <div class="backtrack-panel-header">
               <div class="backtrack-header-left">
@@ -997,14 +1018,87 @@ export class BacktrackWidget {
 
             <!-- Toast Flutuante -->
             ${this.renderToastHtml()}
-          </div>
-        `
-            : ''
-        }
-      </div>
     `;
+  }
 
-    this.attachEventListeners();
+  private render(): void {
+    if (!this.shadow) return;
+
+    let styleEl = this.shadow.querySelector('style');
+    if (!styleEl) {
+      styleEl = document.createElement('style');
+      styleEl.textContent = WIDGET_CSS;
+      this.shadow.appendChild(styleEl);
+    }
+
+    let rootEl = this.shadow.querySelector('.backtrack-root') as HTMLElement | null;
+    if (!rootEl) {
+      rootEl = document.createElement('div');
+      rootEl.className = 'backtrack-root';
+      this.shadow.appendChild(rootEl);
+    }
+
+    const statusClass =
+      this.health?.state === 'recording'
+        ? 'backtrack-status-recording'
+        : this.health?.state === 'degraded'
+        ? 'backtrack-status-degraded'
+        : 'backtrack-status-idle';
+
+    const incidentCount = this.incidents.length;
+
+    let launcher = rootEl.querySelector('#btn-launcher') as HTMLElement | null;
+    if (!launcher) {
+      const launcherWrap = document.createElement('div');
+      launcherWrap.innerHTML = this.renderLauncherHtml(statusClass, incidentCount);
+      launcher = launcherWrap.firstElementChild as HTMLElement;
+      rootEl.appendChild(launcher);
+      this.attachLauncherListeners(launcher);
+    } else {
+      const dot = launcher.querySelector('.backtrack-launcher-status-dot');
+      if (dot) {
+        dot.className = `backtrack-launcher-status-dot ${statusClass}`;
+      }
+      let badge = launcher.querySelector('.backtrack-incident-badge-count');
+      if (incidentCount > 0) {
+        if (!badge) {
+          badge = document.createElement('span');
+          badge.className = 'backtrack-incident-badge-count';
+          launcher.appendChild(badge);
+        }
+        badge.textContent = String(incidentCount);
+      } else if (badge) {
+        badge.remove();
+      }
+    }
+
+    let panel = rootEl.querySelector('.backtrack-panel') as HTMLElement | null;
+    if (!this.isOpen) {
+      if (panel) {
+        panel.remove();
+      }
+    } else {
+      const panelContent = this.renderPanelContentHtml();
+      if (!panel) {
+        panel = document.createElement('div');
+        panel.className = 'backtrack-panel';
+        panel.setAttribute('role', 'dialog');
+        panel.setAttribute('aria-labelledby', 'backtrack-title');
+        panel.innerHTML = panelContent;
+        rootEl.appendChild(panel);
+      } else {
+        const oldBody = panel.querySelector('.backtrack-panel-body');
+        const scrollTop = oldBody ? oldBody.scrollTop : 0;
+
+        panel.innerHTML = panelContent;
+
+        const newBody = panel.querySelector('.backtrack-panel-body');
+        if (newBody && scrollTop > 0) {
+          newBody.scrollTop = scrollTop;
+        }
+      }
+      this.attachPanelListeners();
+    }
   }
 
   private renderIncidentsHtml(): string {
@@ -1400,212 +1494,212 @@ export class BacktrackWidget {
     });
   }
 
-  private attachEventListeners(): void {
+  private attachLauncherListeners(launcher: HTMLElement): void {
+    if (launcher.dataset.hasListeners) return;
+    launcher.dataset.hasListeners = 'true';
+
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let initialLeft = 0;
+    let initialTop = 0;
+    let hasMoved = false;
+
+    launcher.addEventListener(
+      'touchstart',
+      (e) => {
+        if (e.touches.length === 1 && this.container) {
+          const t = e.touches[0];
+          touchStartX = t.clientX;
+          touchStartY = t.clientY;
+          const rect = this.container.getBoundingClientRect();
+          initialLeft = rect.left;
+          initialTop = rect.top;
+          hasMoved = false;
+        }
+      },
+      { passive: true }
+    );
+
+    launcher.addEventListener(
+      'touchmove',
+      (e) => {
+        if (e.touches.length === 1 && this.container) {
+          const t = e.touches[0];
+          const dx = t.clientX - touchStartX;
+          const dy = t.clientY - touchStartY;
+          if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+            hasMoved = true;
+            this.container.style.left = `${initialLeft + dx}px`;
+            this.container.style.top = `${initialTop + dy}px`;
+            this.container.style.bottom = 'auto';
+            this.container.style.right = 'auto';
+          }
+        }
+      },
+      { passive: true }
+    );
+
+    launcher.addEventListener('touchend', () => {
+      if (hasMoved) {
+        this.wasDragged = true;
+        setTimeout(() => {
+          this.wasDragged = false;
+        }, 150);
+      }
+    });
+
+    launcher.addEventListener('click', (e) => {
+      if (this.wasDragged) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      this.toggleOpen();
+    });
+  }
+
+  private attachPanelListeners(): void {
     if (!this.shadow) return;
 
-    const launcher = this.shadow.getElementById('btn-launcher');
-    if (launcher) {
-      let touchStartX = 0;
-      let touchStartY = 0;
-      let initialLeft = 0;
-      let initialTop = 0;
-      let hasMoved = false;
+    this.shadow.getElementById('btn-close')?.addEventListener('click', () => {
+      this.toggleOpen();
+    });
 
-      launcher.addEventListener(
-        'touchstart',
-        (e) => {
-          if (e.touches.length === 1 && this.container) {
-            const t = e.touches[0];
-            touchStartX = t.clientX;
-            touchStartY = t.clientY;
-            const rect = this.container.getBoundingClientRect();
-            initialLeft = rect.left;
-            initialTop = rect.top;
-            hasMoved = false;
-          }
-        },
-        { passive: true }
-      );
+    this.shadow.getElementById('btn-dismiss-banner')?.addEventListener('click', () => {
+      this.dismissBanner();
+    });
 
-      launcher.addEventListener(
-        'touchmove',
-        (e) => {
-          if (e.touches.length === 1 && this.container) {
-            const t = e.touches[0];
-            const dx = t.clientX - touchStartX;
-            const dy = t.clientY - touchStartY;
-            if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
-              hasMoved = true;
-              this.container.style.left = `${initialLeft + dx}px`;
-              this.container.style.top = `${initialTop + dy}px`;
-              this.container.style.bottom = 'auto';
-              this.container.style.right = 'auto';
-            }
-          }
-        },
-        { passive: true }
-      );
+    this.shadow.getElementById('btn-header-menu')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.isHeaderMenuOpen = !this.isHeaderMenuOpen;
+      this.render();
+    });
 
-      launcher.addEventListener('touchend', () => {
-        if (hasMoved) {
-          this.wasDragged = true;
-          setTimeout(() => {
-            this.wasDragged = false;
-          }, 150);
+    this.shadow.getElementById('btn-hide-widget')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.isHeaderMenuOpen = false;
+      this.showHideConfirmModal = true;
+      this.render();
+    });
+
+    this.shadow.getElementById('btn-duration-60')?.addEventListener('click', () => {
+      this.selectedDurationSeconds = 60;
+      this.isCustomDuration = false;
+      this.render();
+    });
+
+    this.shadow.getElementById('btn-duration-300')?.addEventListener('click', () => {
+      this.selectedDurationSeconds = 300;
+      this.isCustomDuration = false;
+      this.render();
+    });
+
+    this.shadow.getElementById('btn-duration-all')?.addEventListener('click', () => {
+      this.selectedDurationSeconds = 0;
+      this.isCustomDuration = false;
+      this.render();
+    });
+
+    this.shadow.getElementById('btn-duration-custom')?.addEventListener('click', () => {
+      this.isCustomDuration = true;
+      this.render();
+    });
+
+    const customInput = this.shadow.getElementById('input-custom-duration') as HTMLInputElement | null;
+    if (customInput) {
+      customInput.addEventListener('input', (e) => {
+        const val = parseInt((e.target as HTMLInputElement).value, 10);
+        if (!isNaN(val)) {
+          this.selectedDurationSeconds = Math.max(5, Math.min(900, val));
         }
       });
-
-      launcher.addEventListener('click', (e) => {
-        if (this.wasDragged) {
-          e.preventDefault();
-          e.stopPropagation();
-          return;
-        }
-        this.toggleOpen();
+      customInput.addEventListener('change', (e) => {
+        const val = parseInt((e.target as HTMLInputElement).value, 10);
+        const clamped = isNaN(val) ? 60 : Math.max(5, Math.min(900, val));
+        this.selectedDurationSeconds = clamped;
+        customInput.value = String(clamped);
       });
     }
 
-    if (this.isOpen) {
-      this.shadow.getElementById('btn-close')?.addEventListener('click', () => {
-        this.toggleOpen();
+    this.shadow.getElementById('btn-save')?.addEventListener('click', () => {
+      this.handleCapture();
+    });
+
+    this.shadow.getElementById('btn-annotate')?.addEventListener('click', () => {
+      this.handleAnnotate();
+    });
+
+    this.shadow.getElementById('btn-clear')?.addEventListener('click', () => {
+      this.handleClear();
+    });
+
+    this.attachIncidentListeners();
+
+    if (this.exportModalIncidentId) {
+      this.shadow.getElementById('btn-close-export-modal')?.addEventListener('click', () => {
+        this.closeExportModal();
       });
-
-      this.shadow.getElementById('btn-dismiss-banner')?.addEventListener('click', () => {
-        this.dismissBanner();
+      this.shadow.getElementById('btn-cancel-export-modal')?.addEventListener('click', () => {
+        this.closeExportModal();
       });
-
-      this.shadow.getElementById('btn-header-menu')?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.isHeaderMenuOpen = !this.isHeaderMenuOpen;
-        this.render();
+      this.shadow.getElementById('check-include-incident-link')?.addEventListener('change', (e) => {
+        this.exportModalIncludeLink = (e.target as HTMLInputElement).checked;
       });
-
-      this.shadow.getElementById('btn-hide-widget')?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.isHeaderMenuOpen = false;
-        this.showHideConfirmModal = true;
-        this.render();
-      });
-
-      this.shadow.getElementById('btn-duration-60')?.addEventListener('click', () => {
-        this.selectedDurationSeconds = 60;
-        this.isCustomDuration = false;
-        this.render();
-      });
-
-      this.shadow.getElementById('btn-duration-300')?.addEventListener('click', () => {
-        this.selectedDurationSeconds = 300;
-        this.isCustomDuration = false;
-        this.render();
-      });
-
-      this.shadow.getElementById('btn-duration-all')?.addEventListener('click', () => {
-        this.selectedDurationSeconds = 0;
-        this.isCustomDuration = false;
-        this.render();
-      });
-
-      this.shadow.getElementById('btn-duration-custom')?.addEventListener('click', () => {
-        this.isCustomDuration = true;
-        this.render();
-      });
-
-      const customInput = this.shadow.getElementById('input-custom-duration') as HTMLInputElement | null;
-      if (customInput) {
-        customInput.addEventListener('input', (e) => {
-          const val = parseInt((e.target as HTMLInputElement).value, 10);
-          if (!isNaN(val)) {
-            this.selectedDurationSeconds = Math.max(5, Math.min(900, val));
-          }
-        });
-        customInput.addEventListener('change', (e) => {
-          const val = parseInt((e.target as HTMLInputElement).value, 10);
-          const clamped = isNaN(val) ? 60 : Math.max(5, Math.min(900, val));
-          this.selectedDurationSeconds = clamped;
-          customInput.value = String(clamped);
-        });
-      }
-
-      this.shadow.getElementById('btn-save')?.addEventListener('click', () => {
-        this.handleCapture();
-      });
-
-      this.shadow.getElementById('btn-annotate')?.addEventListener('click', () => {
-        this.handleAnnotate();
-      });
-
-      this.shadow.getElementById('btn-clear')?.addEventListener('click', () => {
-        this.handleClear();
-      });
-
-      this.attachIncidentListeners();
-
-      if (this.exportModalIncidentId) {
-        this.shadow.getElementById('btn-close-export-modal')?.addEventListener('click', () => {
-          this.closeExportModal();
-        });
-        this.shadow.getElementById('btn-cancel-export-modal')?.addEventListener('click', () => {
-          this.closeExportModal();
-        });
-        this.shadow.getElementById('check-include-incident-link')?.addEventListener('change', (e) => {
-          this.exportModalIncludeLink = (e.target as HTMLInputElement).checked;
-        });
-        this.shadow.getElementById('btn-confirm-export-modal')?.addEventListener('click', () => {
-          this.confirmCopyMarkdown();
-        });
-      }
-
-      if (this.downloadModalIncidentId) {
-        this.shadow.getElementById('btn-close-download-modal')?.addEventListener('click', () => {
-          this.closeDownloadModal();
-        });
-        this.shadow.getElementById('btn-cancel-download-modal')?.addEventListener('click', () => {
-          this.closeDownloadModal();
-        });
-        this.shadow.getElementById('radio-format-ai')?.addEventListener('change', () => {
-          this.downloadModalFormat = 'ai';
-          this.downloadModalError = null;
-          this.render();
-        });
-        this.shadow.getElementById('radio-format-gzip')?.addEventListener('change', () => {
-          this.downloadModalFormat = 'gzip';
-          this.downloadModalError = null;
-          this.render();
-        });
-        this.shadow.getElementById('radio-format-uncompressed')?.addEventListener('change', () => {
-          this.downloadModalFormat = 'uncompressed';
-          this.downloadModalError = null;
-          this.render();
-        });
-        this.shadow.getElementById('btn-confirm-download-modal')?.addEventListener('click', () => {
-          this.confirmDownload();
-        });
-      }
-
-      if (this.showHideConfirmModal) {
-        this.shadow.getElementById('btn-close-hide-modal')?.addEventListener('click', () => {
-          this.showHideConfirmModal = false;
-          this.render();
-        });
-        this.shadow.getElementById('btn-cancel-hide-modal')?.addEventListener('click', () => {
-          this.showHideConfirmModal = false;
-          this.render();
-        });
-        this.shadow.getElementById('btn-confirm-hide-modal')?.addEventListener('click', () => {
-          this.showHideConfirmModal = false;
-          this.hide();
-        });
-      }
-
-      this.shadow.querySelector('.backtrack-panel')?.addEventListener('click', (e) => {
-        if (this.isHeaderMenuOpen) {
-          const target = e.target as HTMLElement | null;
-          if (!target?.closest('.backtrack-header-menu-wrap')) {
-            this.isHeaderMenuOpen = false;
-            this.render();
-          }
-        }
+      this.shadow.getElementById('btn-confirm-export-modal')?.addEventListener('click', () => {
+        this.confirmCopyMarkdown();
       });
     }
+
+    if (this.downloadModalIncidentId) {
+      this.shadow.getElementById('btn-close-download-modal')?.addEventListener('click', () => {
+        this.closeDownloadModal();
+      });
+      this.shadow.getElementById('btn-cancel-download-modal')?.addEventListener('click', () => {
+        this.closeDownloadModal();
+      });
+      this.shadow.getElementById('radio-format-ai')?.addEventListener('change', () => {
+        this.downloadModalFormat = 'ai';
+        this.downloadModalError = null;
+        this.render();
+      });
+      this.shadow.getElementById('radio-format-gzip')?.addEventListener('change', () => {
+        this.downloadModalFormat = 'gzip';
+        this.downloadModalError = null;
+        this.render();
+      });
+      this.shadow.getElementById('radio-format-uncompressed')?.addEventListener('change', () => {
+        this.downloadModalFormat = 'uncompressed';
+        this.downloadModalError = null;
+        this.render();
+      });
+      this.shadow.getElementById('btn-confirm-download-modal')?.addEventListener('click', () => {
+        this.confirmDownload();
+      });
+    }
+
+    if (this.showHideConfirmModal) {
+      this.shadow.getElementById('btn-close-hide-modal')?.addEventListener('click', () => {
+        this.showHideConfirmModal = false;
+        this.render();
+      });
+      this.shadow.getElementById('btn-cancel-hide-modal')?.addEventListener('click', () => {
+        this.showHideConfirmModal = false;
+        this.render();
+      });
+      this.shadow.getElementById('btn-confirm-hide-modal')?.addEventListener('click', () => {
+        this.showHideConfirmModal = false;
+        this.hide();
+      });
+    }
+
+    this.shadow.querySelector('.backtrack-panel')?.addEventListener('click', (e) => {
+      if (this.isHeaderMenuOpen) {
+        const target = e.target as HTMLElement | null;
+        if (!target?.closest('.backtrack-header-menu-wrap')) {
+          this.isHeaderMenuOpen = false;
+          this.render();
+        }
+      }
+    });
   }
 }
