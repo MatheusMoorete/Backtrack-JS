@@ -2,7 +2,7 @@ import { FlightRecorderDB } from '../storage/db';
 import { BatchWriter } from '../storage/batch-writer';
 import { RetentionEngine } from '../storage/retention';
 import { IncidentManager } from '../storage/incident-manager';
-import { getOrCreateSessionContext } from '../storage/session';
+import { claimSessionContext } from '../storage/session';
 import { RecorderStateMachine } from './state-machine';
 
 import { ConsoleCapturer } from '../capturers/console';
@@ -245,7 +245,7 @@ export class FlightRecorderImpl implements FlightRecorder {
 
     try {
       await this.db.open();
-      const sessionCtx = getOrCreateSessionContext();
+      const sessionCtx = await claimSessionContext();
       const environment = this.getEnvironmentMetadata();
 
       this.writer = new BatchWriter(
