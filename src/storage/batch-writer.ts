@@ -7,6 +7,7 @@ export interface BatchWriterConfig {
   flushIntervalMs: number; // default 1000ms
   maxBatchEvents: number;  // default 250
   chunkDurationMs: number; // default 60000ms (60s)
+  initialChunkSequence?: number;
 }
 
 export class BatchWriter {
@@ -40,11 +41,17 @@ export class BatchWriter {
     this.config = {
       flushIntervalMs: config?.flushIntervalMs ?? 1000,
       maxBatchEvents: config?.maxBatchEvents ?? 250,
-      chunkDurationMs: config?.chunkDurationMs ?? 60000
+      chunkDurationMs: config?.chunkDurationMs ?? 60000,
+      initialChunkSequence: config?.initialChunkSequence ?? 0
     };
+    this.chunkSequence = config?.initialChunkSequence ?? 0;
     this.onErrorCallback = onError;
 
     this.initPageHideListener();
+  }
+
+  public getChunkSequence(): number {
+    return this.chunkSequence;
   }
 
   public setOnChunkPersisted(callback: (chunk: StoredChunk) => void): void {

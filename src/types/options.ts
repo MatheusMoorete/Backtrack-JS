@@ -1,6 +1,8 @@
 import type { IncidentSummary } from './incident';
 import type { RecorderHealth } from './health';
 import type { FlightRecorderArtifactV1, EnvironmentMetadata } from './artifact';
+import type { BatchWriterConfig } from '../storage/batch-writer';
+import type { ClaimSessionOptions } from '../storage/session';
 
 export interface ErrorContext {
   source?: 'react' | 'manual' | 'window' | 'unhandledrejection';
@@ -41,6 +43,9 @@ export interface FlightRecorderOptions {
   recorderVersion?: string;
   showWidget?: boolean;
   widgetOptions?: WidgetOptions;
+  storage?: Storage;
+  sessionOptions?: ClaimSessionOptions;
+  batchWriterConfig?: Partial<BatchWriterConfig>;
 }
 
 export interface CaptureOptions {

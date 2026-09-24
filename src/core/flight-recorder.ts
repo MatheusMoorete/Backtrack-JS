@@ -70,7 +70,10 @@ export class FlightRecorderImpl implements FlightRecorder {
         sensitiveRoutes: options?.privacy?.sensitiveRoutes,
         autoMaskPII: options?.privacy?.autoMaskPII,
         recordCanvas: options?.privacy?.recordCanvas
-      }
+      },
+      storage: options?.storage,
+      sessionOptions: options?.sessionOptions,
+      batchWriterConfig: options?.batchWriterConfig
     };
 
     this.stateMachine = new RecorderStateMachine('stopped');
@@ -245,14 +248,31 @@ export class FlightRecorderImpl implements FlightRecorder {
 
     try {
       await this.db.open();
-      const sessionCtx = await claimSessionContext();
+      const sessionCtx = await claimSessionContext({
+        ...this.options.sessionOptions,
+        ...(this.options.storage ? { storage: this.options.storage } : {})
+      });
       const environment = this.getEnvironmentMetadata();
+
+      const existingChunks = await this.db.getChunksBySession(sessionCtx.sessionId);
+      const lastTimelineSequence = Math.max(
+        0,
+        ...existingChunks.flatMap((chunk) => (chunk.timeline || []).map((event) => event.sequence))
+      );
+      const lastChunkSequence = Math.max(
+        0,
+        ...existingChunks.map((chunk) => chunk.sequence)
+      );
+      this.sequence = lastTimelineSequence;
 
       this.writer = new BatchWriter(
         this.db,
         sessionCtx.sessionId,
         sessionCtx.tabId,
-        undefined,
+        {
+          ...this.options.batchWriterConfig,
+          initialChunkSequence: lastChunkSequence
+        },
         (err) => {
           this.stateMachine.transition({
             type: 'DEGRADE',
@@ -566,6 +586,20 @@ export class FlightRecorderImpl implements FlightRecorder {
       incidentCount: this.cachedIncidentCount,
       reasons: this.stateMachine.getDegradedReasons()
     };
+  }
+
+  public getSequence(): number {
+    return this.sequence;
+  }
+
+  public async flush(): Promise<void> {
+    if (this.writer) {
+      await this.writer.flush();
+    }
+  }
+
+  public destroy(): void {
+    this.stop();
   }
 }
 
