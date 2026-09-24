@@ -40,22 +40,32 @@ const finite = (value: unknown): value is number => typeof value === 'number' &&
 
 /** Validates the envelope and the minimum rrweb payload before handing it to the player. */
 export function isReplayEvent(value: unknown): boolean {
-  if (!isRecord(value) || !Number.isInteger(value.type) || !finite(value.timestamp) || !isRecord(value.data)) return false;
+  if (
+    !isRecord(value) ||
+    !Number.isInteger(value.type) ||
+    (value.type as number) < 0 ||
+    !finite(value.timestamp) ||
+    !isRecord(value.data)
+  ) {
+    return false;
+  }
   const data = value.data;
   switch (value.type) {
-    case 0: case 1: return true;
-    case 2: return isRecord(data.node) && Number.isInteger(data.node.id) && Number.isInteger(data.node.type);
-    case 3:
-      if (!Number.isInteger(data.source) || (data.source as number) < 0 || (data.source as number) > 16) return false;
-      if (data.source === 0) return ['adds', 'removes', 'texts', 'attributes'].every((key) => Array.isArray(data[key]) && (data[key] as unknown[]).every(isRecord));
-      if ([1, 6, 12].includes(data.source as number)) return Array.isArray(data.positions) && data.positions.every(isRecord);
-      if (data.source === 4) return finite(data.width) && data.width > 0 && finite(data.height) && data.height > 0;
-      if ([2, 3, 5, 7, 8, 9, 13, 14].includes(data.source as number)) return Number.isInteger(data.id);
+    case 0:
+    case 1:
       return true;
-    case 4: return typeof data.href === 'string' && finite(data.width) && data.width > 0 && finite(data.height) && data.height > 0;
-    case 5: return typeof data.tag === 'string';
-    case 6: return typeof data.plugin === 'string';
-    default: return false;
+    case 2:
+      return isRecord(data.node);
+    case 3:
+      return Number.isInteger(data.source) && (data.source as number) >= 0;
+    case 4:
+      return typeof data.href === 'string';
+    case 5:
+      return typeof data.tag === 'string';
+    case 6:
+      return typeof data.plugin === 'string';
+    default:
+      return true;
   }
 }
 

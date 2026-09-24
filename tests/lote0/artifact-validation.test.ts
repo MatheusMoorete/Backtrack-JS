@@ -156,4 +156,85 @@ describe('Lote 0 — Validação do Artefato v1', () => {
     const res = validateFlightRecorderArtifact(validWithEarlyMeta);
     expect(res.success).toBe(true);
   });
+
+  it('aceita eventos legítimos de replay comuns em dispositivos móveis (Selection, Touch, AdoptedStyleSheet)', () => {
+    const startedAt = 10000;
+    const mobileEvents = [
+      {
+        type: 4,
+        data: { href: 'https://app.uticket.com.br/', width: 390, height: 844 },
+        timestamp: startedAt
+      },
+      {
+        type: 2,
+        data: { node: { id: 1, type: 0, childNodes: [] } },
+        timestamp: startedAt + 10
+      },
+      // TouchMove (source: 6)
+      {
+        type: 3,
+        data: {
+          source: 6,
+          positions: [{ x: 120, y: 350, id: 10, timeOffset: 5 }]
+        },
+        timestamp: startedAt + 20
+      },
+      // Selection change no celular (source: 14) sem campo id no root de data
+      {
+        type: 3,
+        data: {
+          source: 14,
+          ranges: [{ start: 5, startOffset: 0, end: 5, endOffset: 10 }]
+        },
+        timestamp: startedAt + 30
+      },
+      // MouseInteraction tipo TouchStart (source: 2)
+      {
+        type: 3,
+        data: {
+          source: 2,
+          type: 7, // TouchStart
+          id: 15,
+          x: 120,
+          y: 350,
+          pointerType: 2 // Touch
+        },
+        timestamp: startedAt + 40
+      },
+      // AdoptedStyleSheet (source: 15)
+      {
+        type: 3,
+        data: {
+          source: 15,
+          id: 1,
+          styleIds: [1]
+        },
+        timestamp: startedAt + 50
+      },
+      // StyleSheetRule com styleId sem id (source: 8)
+      {
+        type: 3,
+        data: {
+          source: 8,
+          styleId: 3,
+          adds: [{ rule: '.mobile { display: block; }', index: 0 }]
+        },
+        timestamp: startedAt + 60
+      }
+    ];
+
+    const mobileArtifact = {
+      ...fixtureContent,
+      incident: {
+        ...fixtureContent.incident,
+        startedAt,
+        finalizedAt: startedAt + 1000
+      },
+      replay: mobileEvents
+    };
+
+    const res = validateFlightRecorderArtifact(mobileArtifact);
+    expect(res.success).toBe(true);
+  });
 });
+
