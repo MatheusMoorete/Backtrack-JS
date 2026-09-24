@@ -125,6 +125,7 @@ export class IncidentManager {
   private pendingIncident: StoredIncident | null = null;
   private hasExtendedOnce = false;
   private finalizeTimer: ReturnType<typeof setTimeout> | null = null;
+  private onIncidentPendingCallback?: (incident: StoredIncident) => void;
   private onIncidentFinalizedCallback?: (incident: StoredIncident) => void;
   private beforeFinalizeCallback?: () => Promise<void>;
 
@@ -144,6 +145,10 @@ export class IncidentManager {
       recorderVersion: config?.recorderVersion ?? '0.1.0',
       getRecordingIssues: config?.getRecordingIssues
     };
+  }
+
+  public setOnIncidentPending(callback: (incident: StoredIncident) => void): void {
+    this.onIncidentPendingCallback = callback;
   }
 
   public setOnIncidentFinalized(callback: (incident: StoredIncident) => void): void {
@@ -221,6 +226,10 @@ export class IncidentManager {
       this.finalizeTimer = setTimeout(() => {
         this.finalize(incidentId);
       }, this.config.afterErrorSeconds * 1000);
+
+      if (this.onIncidentPendingCallback) {
+        this.onIncidentPendingCallback(newIncident);
+      }
 
       return incidentId;
     }

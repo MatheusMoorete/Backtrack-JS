@@ -101,7 +101,7 @@ export class ErrorCapturer {
   /**
    * API pública para capturar exceções explicitamente (ex: do SentryBoundary do uTicket).
    */
-  public captureException(error: unknown, context?: ErrorContext): void {
+  public captureException(error: unknown, context?: ErrorContext): Promise<string | undefined> | void {
     if (!this.isRecording) return;
 
     try {
@@ -124,7 +124,7 @@ export class ErrorCapturer {
 
       const source: ErrorSource = context?.source === 'react' ? 'react' : 'manual';
 
-      this.recordAndTriggerError({
+      return this.recordAndTriggerError({
         source,
         name,
         message,
@@ -145,7 +145,7 @@ export class ErrorCapturer {
     lineno?: number;
     colno?: number;
     componentStack?: string;
-  }): void {
+  }): Promise<string> {
     const now = Date.now();
     const event: ErrorTimelineEvent = {
       id: `err_${now}_${Math.random().toString(36).substring(2, 7)}`,
@@ -175,7 +175,7 @@ export class ErrorCapturer {
         ? 'unhandledrejection'
         : 'error';
 
-    this.incidentManager.trigger(reason, {
+    return this.incidentManager.trigger(reason, {
       id: `trig_${now}_${Math.random().toString(36).substring(2, 7)}`,
       timestamp: now,
       type: reason,

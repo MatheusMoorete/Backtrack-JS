@@ -300,8 +300,14 @@ export class FlightRecorderImpl implements FlightRecorder {
         }
       );
 
+      this.incidentManager.setOnIncidentPending(() => {
+        this.stateMachine.transition({ type: 'TRIGGER_AUTO' });
+      });
+
       this.incidentManager.setOnIncidentFinalized(() => {
-        this.stateMachine.transition({ type: 'FINALIZE_INCIDENT' });
+        if (!this.incidentManager?.getPendingIncident()) {
+          this.stateMachine.transition({ type: 'FINALIZE_INCIDENT' });
+        }
         this.updateStatsCache();
       });
 
@@ -352,6 +358,10 @@ export class FlightRecorderImpl implements FlightRecorder {
       this.performanceCapturer.start();
 
       this.stateMachine.transition({ type: 'START' });
+
+      if (this.incidentManager.getPendingIncident()) {
+        this.stateMachine.transition({ type: 'TRIGGER_AUTO' });
+      }
 
       // Inicia ciclo de retenção periódico (a cada 30 segundos)
       this.retentionIntervalTimer = setInterval(() => {
@@ -477,15 +487,14 @@ export class FlightRecorderImpl implements FlightRecorder {
       windowSeconds
     );
 
-    this.stateMachine.transition({ type: 'TRIGGER_MANUAL' });
     await this.updateStatsCache();
     return incidentId;
   }
 
-  public captureException(error: unknown, context?: ErrorContext): void {
+  public captureException(error: unknown, context?: ErrorContext): Promise<string | undefined> | void {
     if (!this.errorCapturer) return;
     try {
-      this.errorCapturer.captureException(error, context);
+      return this.errorCapturer.captureException(error, context);
     } catch {
       // captureException nunca relança
     }

@@ -35,7 +35,7 @@ describe('Lote 0 — Máquina de Estados do Recorder', () => {
     expect(sm.isRecording()).toBe(true);
   });
 
-  it('retorna a recording após FINALIZE_INCIDENT ou TRIGGER_MANUAL', () => {
+  it('retorna a recording após FINALIZE_INCIDENT', () => {
     const sm = new RecorderStateMachine();
     sm.transition({ type: 'START' });
     sm.transition({ type: 'TRIGGER_AUTO' });
@@ -43,6 +43,16 @@ describe('Lote 0 — Máquina de Estados do Recorder', () => {
 
     sm.transition({ type: 'FINALIZE_INCIDENT' });
     expect(sm.getState()).toBe('recording');
+  });
+
+  it('TRIGGER_MANUAL não altera o estado de incident_pending', () => {
+    const sm = new RecorderStateMachine();
+    sm.transition({ type: 'START' });
+    sm.transition({ type: 'TRIGGER_AUTO' });
+    expect(sm.getState()).toBe('incident_pending');
+
+    sm.transition({ type: 'TRIGGER_MANUAL' });
+    expect(sm.getState()).toBe('incident_pending');
   });
 
   it('transita para degraded em caso de erro de persistência e preserva contexto', () => {

@@ -8,7 +8,6 @@ import {
   resetSessionContext
 } from '../../src/storage/session';
 import { sortTimelineEvents } from '../../src/validation/validate';
-import type { TimelineEvent } from '../../src/types/timeline';
 
 function createMockStorage(initialData: Record<string, string> = {}): Storage {
   const store = new Map<string, string>(Object.entries(initialData));

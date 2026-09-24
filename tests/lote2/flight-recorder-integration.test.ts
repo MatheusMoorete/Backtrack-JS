@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 import { FlightRecorderDB } from '../../src/storage/db';
 import { FlightRecorderImpl } from '../../src/core/flight-recorder';
 import { validateFlightRecorderArtifact } from '../../src/validation/validate';
+import { resetSessionContext } from '../../src/storage/session';
 
 describe('Lote 2 — FlightRecorder Integrado', () => {
   let idb: IDBFactory;
@@ -72,5 +73,198 @@ describe('Lote 2 — FlightRecorder Integrado', () => {
   it('stop() impede novas capturas e restaura o recorder para stopped', () => {
     recorder.stop();
     expect(recorder.getHealth().state).toBe('stopped');
+  });
+});
+
+function createMockStorage(initialData: Record<string, string> = {}): Storage {
+  const store = new Map<string, string>(Object.entries(initialData));
+  return {
+    getItem: (key: string) => store.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      store.set(key, String(value));
+    },
+    removeItem: (key: string) => {
+      store.delete(key);
+    },
+    clear: () => {
+      store.clear();
+    },
+    get length() {
+      return store.size;
+    },
+    key: (index: number) => Array.from(store.keys())[index] ?? null
+  };
+}
+
+describe('Lote 2 — Sincronização de incident_pending com IncidentManager', () => {
+  let idb: IDBFactory;
+  let db: FlightRecorderDB;
+  let recorder: FlightRecorderImpl;
+
+  beforeEach(async () => {
+    vi.useFakeTimers({
+      toFake: ['Date', 'setTimeout', 'clearTimeout']
+    });
+    vi.setSystemTime(1700000000000);
+    resetSessionContext();
+    idb = new IDBFactory();
+    db = new FlightRecorderDB(idb);
+    recorder = new FlightRecorderImpl(
+      {
+        bufferMinutes: 5,
+        afterErrorSeconds: 10,
+        sessionOptions: { disableBroadcastChannel: true }
+      },
+      db
+    );
+    await recorder.start();
+  });
+
+  afterEach(() => {
+    recorder.stop();
+    db.close();
+    resetSessionContext();
+    vi.useRealTimers();
+  });
+
+  it('erro automático muda getHealth().state para incident_pending e fim do prazo retorna para recording', async () => {
+    expect(recorder.getHealth().state).toBe('recording');
+
+    await recorder.captureException(new Error('Erro de teste'));
+    expect(recorder.getHealth().state).toBe('incident_pending');
+
+    // Ao expirar o prazo após 10 segundos, finaliza e retorna para recording
+    await vi.advanceTimersByTimeAsync(10000);
+    await vi.waitFor(() => expect(recorder.getHealth().state).toBe('recording'));
+  });
+
+  it('captura manual durante incidente automático não altera o estado pendente', async () => {
+    await recorder.captureException(new Error('Erro inicial'));
+    expect(recorder.getHealth().state).toBe('incident_pending');
+
+    // Captura manual durante a janela de tolerância não finaliza o estado da máquina
+    await recorder.capture('manual_no_meio');
+    expect(recorder.getHealth().state).toBe('incident_pending');
+
+    // Quando o prazo do incidente automático expira, transita para recording
+    await vi.advanceTimersByTimeAsync(10000);
+    await vi.waitFor(() => expect(recorder.getHealth().state).toBe('recording'));
+  });
+
+  it('reload dentro do prazo recupera incident_pending', async () => {
+    const fixedNow = 1700000000000;
+    const storage = createMockStorage();
+    const customDb = new FlightRecorderDB(new IDBFactory());
+
+    const rec1 = new FlightRecorderImpl(
+      {
+        storage,
+        sessionOptions: { disableBroadcastChannel: true },
+        afterErrorSeconds: 10
+      },
+      customDb
+    );
+    await rec1.start();
+    expect(rec1.getHealth().state).toBe('recording');
+
+    await rec1.captureException(new Error('Erro antes do reload'));
+    expect(rec1.getHealth().state).toBe('incident_pending');
+
+    // Avança 4s (ainda restam 6s para finalizeAt)
+    vi.setSystemTime(fixedNow + 4000);
+    rec1.destroy();
+    resetSessionContext();
+
+    // Nova instância simulando a mesma aba após reload
+    const rec2 = new FlightRecorderImpl(
+      {
+        storage,
+        sessionOptions: { disableBroadcastChannel: true },
+        afterErrorSeconds: 10
+      },
+      customDb
+    );
+    await rec2.start();
+
+    // Deve inicializar recuperando o estado incident_pending
+    expect(rec2.getHealth().state).toBe('incident_pending');
+
+    // Avança os 6 segundos restantes
+    vi.setSystemTime(fixedNow + 10000);
+    await vi.advanceTimersByTimeAsync(6000);
+
+    await vi.waitFor(() => expect(rec2.getHealth().state).toBe('recording'));
+
+    rec2.destroy();
+    customDb.close();
+  });
+
+  it('reload depois do prazo finaliza o incidente e inicia em recording', async () => {
+    const fixedNow = 1700000000000;
+    const storage = createMockStorage();
+    const customDb = new FlightRecorderDB(new IDBFactory());
+
+    const rec1 = new FlightRecorderImpl(
+      {
+        storage,
+        sessionOptions: { disableBroadcastChannel: true },
+        afterErrorSeconds: 10
+      },
+      customDb
+    );
+    await rec1.start();
+    expect(rec1.getHealth().state).toBe('recording');
+
+    await rec1.captureException(new Error('Erro antes do reload'));
+    expect(rec1.getHealth().state).toBe('incident_pending');
+
+    rec1.destroy();
+    resetSessionContext();
+
+    // Avança 15s (além do prazo de 10s: finalizeAt já expirou)
+    vi.setSystemTime(fixedNow + 15000);
+
+    const rec2 = new FlightRecorderImpl(
+      {
+        storage,
+        sessionOptions: { disableBroadcastChannel: true },
+        afterErrorSeconds: 10
+      },
+      customDb
+    );
+    await rec2.start();
+
+    // Como o prazo já havia vencido, finaliza durante o init() e inicia em recording
+    expect(rec2.getHealth().state).toBe('recording');
+
+    const incidents = await rec2.listIncidents();
+    expect(incidents.length).toBe(1);
+    expect(incidents[0].finalizedAt).toBeDefined();
+
+    const stored = await customDb.getIncident(incidents[0].id);
+    expect(stored?.state).toBe('finalized');
+
+    rec2.destroy();
+    customDb.close();
+  });
+
+  it('gatilho duplicado não cria nova transição nem novo incidente', async () => {
+    const fixedNow = 1700000000000;
+    vi.setSystemTime(fixedNow);
+
+    expect(recorder.getHealth().state).toBe('recording');
+
+    const err = new Error('Erro deduplicado');
+    await recorder.captureException(err);
+    expect(recorder.getHealth().state).toBe('incident_pending');
+
+    // Dispara novamente o mesmo erro dentro de 10s
+    vi.setSystemTime(fixedNow + 2000);
+    await recorder.captureException(err);
+    expect(recorder.getHealth().state).toBe('incident_pending');
+
+    const incidents = await recorder.listIncidents();
+    expect(incidents.length).toBe(1);
+    expect(incidents[0].triggerCount).toBe(2);
   });
 });

@@ -89,6 +89,9 @@ export class RecorderStateMachine {
         break;
 
       case 'TRIGGER_MANUAL':
+        // Captura manual é imediata e inócua para a máquina de estados (não altera incident_pending)
+        break;
+
       case 'FINALIZE_INCIDENT':
         if (this.currentState === 'incident_pending') {
           this.currentState = 'recording';
