@@ -169,9 +169,9 @@ export class FlightRecorderImpl implements FlightRecorder {
     return FlightRecorderImpl.toggleWidget();
   }
 
-  public static resetInstance(): void {
+  public static async resetInstance(): Promise<void> {
     if (FlightRecorderImpl.activeInstance) {
-      FlightRecorderImpl.activeInstance.stop();
+      await FlightRecorderImpl.activeInstance.stop();
       FlightRecorderImpl.activeInstance = null;
     }
   }
@@ -403,37 +403,18 @@ export class FlightRecorderImpl implements FlightRecorder {
     }
   }
 
-  public stop(): void {
-    if (this.stateMachine.getState() === 'stopped') return;
+  private stoppingPromise?: Promise<void>;
 
-    if (this.widget) {
-      this.widget.unmount();
-      this.widget = null;
-    }
-
-    if (FlightRecorderImpl.activeInstance === this) {
-      FlightRecorderImpl.activeInstance = null;
-    }
-
-    if (this.retentionIntervalTimer) {
-      clearInterval(this.retentionIntervalTimer);
-      this.retentionIntervalTimer = null;
-    }
-
+  private stopCapturers(): void {
     this.rrwebCapturer?.stop();
     this.navigationCapturer?.stop();
     this.networkCapturer?.stop();
     this.errorCapturer?.stop();
     this.consoleCapturer?.stop();
     this.performanceCapturer?.stop();
+  }
 
-    if (this.writer) {
-      this.writer.flush();
-      this.writer.destroy();
-    }
-
-    this.incidentManager?.destroy();
-
+  private clearRuntimeReferences(): void {
     this.rrwebCapturer = null;
     this.navigationCapturer = null;
     this.networkCapturer = null;
@@ -442,8 +423,44 @@ export class FlightRecorderImpl implements FlightRecorder {
     this.performanceCapturer = null;
     this.writer = null;
     this.incidentManager = null;
+  }
 
-    this.stateMachine.transition({ type: 'STOP' });
+  public async stop(): Promise<void> {
+    if (this.stateMachine.getState() === 'stopped') return;
+    if (this.stoppingPromise) return this.stoppingPromise;
+
+    this.stoppingPromise = (async () => {
+      this.stopCapturers();
+
+      if (this.retentionIntervalTimer) {
+        clearInterval(this.retentionIntervalTimer);
+        this.retentionIntervalTimer = null;
+      }
+
+      if (this.widget) {
+        this.widget.unmount();
+        this.widget = null;
+      }
+
+      if (FlightRecorderImpl.activeInstance === this) {
+        FlightRecorderImpl.activeInstance = null;
+      }
+
+      if (this.writer) {
+        await this.writer.flush();
+      }
+      this.writer?.destroy();
+      this.incidentManager?.destroy();
+
+      this.clearRuntimeReferences();
+      this.stateMachine.transition({ type: 'STOP' });
+    })();
+
+    try {
+      await this.stoppingPromise;
+    } finally {
+      this.stoppingPromise = undefined;
+    }
   }
 
   public async capture(
@@ -607,8 +624,8 @@ export class FlightRecorderImpl implements FlightRecorder {
     }
   }
 
-  public destroy(): void {
-    this.stop();
+  public async destroy(): Promise<void> {
+    await this.stop();
   }
 }
 

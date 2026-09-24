@@ -137,9 +137,9 @@ This starts a local server at `http://localhost:5173/` and opens your default br
 | Method | Return Type | Description |
 | --- | --- | --- |
 | `start()` | `Promise<void>` | Initializes storage and begins recording. |
-| `stop()` | `void` | Stops recording and detaches listeners. |
+| `stop()` | `Promise<void>` | Stops recording, flushes pending batches to storage, and detaches listeners. |
 | `capture(reason?, windowSeconds?)` | `Promise<string>` | Manually captures and finalizes an incident. Returns incident ID. |
-| `captureException(error, context?)` | `void` | Records a caught exception and triggers an incident. |
+| `captureException(error, context?)` | `Promise<string \| undefined> \| void` | Records a caught exception and triggers an incident. |
 | `listIncidents()` | `Promise<IncidentSummary[]>` | Lists all stored incidents. |
 | `getArtifact(incidentId)` | `Promise<FlightRecorderArtifactV1>` | Retrieves the full artifact for an incident. |
 | `exportIncident(incidentId)` | `Promise<FlightRecorderArtifactV1>` | Exports the artifact and marks it finalized. |

@@ -27,6 +27,7 @@ export class BatchWriter {
   private onErrorCallback?: (error: unknown) => void;
   private onChunkPersistedCallback?: (chunk: StoredChunk) => void;
   private pageHideHandler?: () => void;
+  private visibilityChangeHandler?: () => void;
 
   constructor(
     db: FlightRecorderDB,
@@ -47,7 +48,7 @@ export class BatchWriter {
     this.chunkSequence = config?.initialChunkSequence ?? 0;
     this.onErrorCallback = onError;
 
-    this.initPageHideListener();
+    this.initLifecycleListeners();
   }
 
   public getChunkSequence(): number {
@@ -183,12 +184,21 @@ export class BatchWriter {
     return this.writeChain;
   }
 
-  private initPageHideListener(): void {
+  private initLifecycleListeners(): void {
     if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
       this.pageHideHandler = () => {
         this.flush();
       };
       window.addEventListener('pagehide', this.pageHideHandler);
+    }
+
+    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+      this.visibilityChangeHandler = () => {
+        if (document.visibilityState === 'hidden') {
+          this.flush();
+        }
+      };
+      document.addEventListener('visibilitychange', this.visibilityChangeHandler);
     }
   }
 
@@ -203,6 +213,15 @@ export class BatchWriter {
       this.pageHideHandler
     ) {
       window.removeEventListener('pagehide', this.pageHideHandler);
+      this.pageHideHandler = undefined;
+    }
+    if (
+      typeof document !== 'undefined' &&
+      typeof document.removeEventListener === 'function' &&
+      this.visibilityChangeHandler
+    ) {
+      document.removeEventListener('visibilitychange', this.visibilityChangeHandler);
+      this.visibilityChangeHandler = undefined;
     }
   }
 }

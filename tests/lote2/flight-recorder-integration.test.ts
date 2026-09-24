@@ -23,8 +23,8 @@ describe('Lote 2 — FlightRecorder Integrado', () => {
     await recorder.start();
   });
 
-  afterEach(() => {
-    recorder.stop();
+  afterEach(async () => {
+    await recorder.stop();
     db.close();
   });
 
@@ -70,8 +70,66 @@ describe('Lote 2 — FlightRecorder Integrado', () => {
     expect(artifact.timeline.some((e) => e.type === 'error')).toBe(true);
   });
 
-  it('stop() impede novas capturas e restaura o recorder para stopped', () => {
-    recorder.stop();
+  it('stop() impede novas capturas e restaura o recorder para stopped', async () => {
+    await recorder.stop();
+    expect(recorder.getHealth().state).toBe('stopped');
+  });
+
+  it('stop() aguarda flush de escritas pendentes e persiste eventos finais no IndexedDB', async () => {
+    console.log('Evento antes de parar o recorder');
+
+    let resolvePutChunk!: () => void;
+    const putChunkDeferred = new Promise<void>((resolve) => {
+      resolvePutChunk = resolve;
+    });
+
+    const originalPutChunk = db.putChunk.bind(db);
+    let intercepted = false;
+
+    vi.spyOn(db, 'putChunk').mockImplementation(async (chunk) => {
+      if (!intercepted) {
+        intercepted = true;
+        await putChunkDeferred;
+      }
+      return originalPutChunk(chunk);
+    });
+
+    let stopResolved = false;
+    const stopPromise = recorder.stop().then(() => {
+      stopResolved = true;
+    });
+
+    // Confirma que stopPromise ainda não resolveu enquanto putChunk estiver pendente
+    await new Promise((r) => setTimeout(r, 30));
+    expect(stopResolved).toBe(false);
+
+    // Libera a escrita no banco
+    resolvePutChunk();
+
+    // Agora stop() deve resolver
+    await stopPromise;
+    expect(stopResolved).toBe(true);
+
+    // Validações pós-stop
+    expect(recorder.getHealth().state).toBe('stopped');
+    expect(recorder.getHealth().pendingWrites).toBe(0);
+
+    // Verifica que o chunk com a mensagem de log foi persistido
+    const chunks = await db.getAllChunks();
+    const hasLogEvent = chunks.some((c) =>
+      c.timeline.some((e) => JSON.stringify(e).includes('Evento antes de parar o recorder'))
+    );
+    expect(hasLogEvent).toBe(true);
+  });
+
+  it('stop() é idempotente ao ser chamado consecutivamente', async () => {
+    expect(recorder.getHealth().state).toBe('recording');
+
+    await recorder.stop();
+    expect(recorder.getHealth().state).toBe('stopped');
+
+    // Segunda chamada consecutiva não deve lançar erro e deve manter stopped
+    await expect(recorder.stop()).resolves.toBeUndefined();
     expect(recorder.getHealth().state).toBe('stopped');
   });
 });
@@ -120,8 +178,8 @@ describe('Lote 2 — Sincronização de incident_pending com IncidentManager', (
     await recorder.start();
   });
 
-  afterEach(() => {
-    recorder.stop();
+  afterEach(async () => {
+    await recorder.stop();
     db.close();
     resetSessionContext();
     vi.useRealTimers();
@@ -218,7 +276,7 @@ describe('Lote 2 — Sincronização de incident_pending com IncidentManager', (
     await rec1.captureException(new Error('Erro antes do reload'));
     expect(rec1.getHealth().state).toBe('incident_pending');
 
-    rec1.destroy();
+    await rec1.destroy();
     resetSessionContext();
 
     // Avança 15s (além do prazo de 10s: finalizeAt já expirou)
@@ -244,7 +302,7 @@ describe('Lote 2 — Sincronização de incident_pending com IncidentManager', (
     const stored = await customDb.getIncident(incidents[0].id);
     expect(stored?.state).toBe('finalized');
 
-    rec2.destroy();
+    await rec2.destroy();
     customDb.close();
   });
 

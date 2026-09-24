@@ -91,4 +91,49 @@ describe('Lote 1 — DB e BatchWriter', () => {
     expect((capturedError as Error).message).toBe('QuotaExceededError');
     writer.destroy();
   });
+
+  it('dispara flush antecipado quando visibilityState muda para hidden', async () => {
+    const writer = new BatchWriter(db, 'sess_visibility', 'tab_visibility', {
+      flushIntervalMs: 60000,
+      maxBatchEvents: 100
+    });
+
+    writer.addTimelineEvent({
+      id: 'e_vis',
+      timestamp: 3000,
+      sequence: 1,
+      type: 'marker',
+      label: 'visibility_test'
+    });
+
+    let chunks = await db.getChunksBySession('sess_visibility');
+    expect(chunks.length).toBe(0);
+
+    const originalVisibilityState = typeof document !== 'undefined' ? document.visibilityState : 'visible';
+    if (typeof document !== 'undefined') {
+      Object.defineProperty(document, 'visibilityState', {
+        value: 'hidden',
+        configurable: true
+      });
+
+      document.dispatchEvent(new Event('visibilitychange'));
+    }
+
+    await vi.waitFor(async () => {
+      chunks = await db.getChunksBySession('sess_visibility');
+      expect(chunks.length).toBe(1);
+    });
+
+    expect(chunks[0].timeline[0].id).toBe('e_vis');
+
+    if (typeof document !== 'undefined') {
+      Object.defineProperty(document, 'visibilityState', {
+        value: originalVisibilityState,
+        configurable: true
+      });
+    }
+
+    writer.destroy();
+  });
 });
+

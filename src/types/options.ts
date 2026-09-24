@@ -56,9 +56,9 @@ export interface CaptureOptions {
 
 export interface FlightRecorder {
   start(): Promise<void>;
-  stop(): void;
+  stop(): Promise<void>;
   capture(reason?: string, windowSeconds?: number, options?: CaptureOptions): Promise<string>;
-  captureException(error: unknown, context?: ErrorContext): void;
+  captureException(error: unknown, context?: ErrorContext): Promise<string | undefined> | void;
   listIncidents(): Promise<IncidentSummary[]>;
   getArtifact(incidentId: string): Promise<FlightRecorderArtifactV1>;
   exportIncident(
