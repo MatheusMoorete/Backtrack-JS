@@ -48,6 +48,9 @@ export class FlightRecorderImpl implements FlightRecorder {
   private retentionPromise: Promise<void> | null = null;
   private cachedStorageBytes = 0;
   private cachedIncidentCount = 0;
+  private pageHideHandler?: () => void;
+  private beforeUnloadHandler?: () => void;
+  private visibilityChangeHandler?: () => void;
   private cachedProtectedBytes = 0;
   private cachedBrowserEstimateBytes?: number;
   private cachedBrowserQuotaBytes?: number;
@@ -402,6 +405,26 @@ export class FlightRecorderImpl implements FlightRecorder {
         this.widget = new BacktrackWidget(this, this.options.widgetOptions);
         this.widget.mount();
       }
+
+      if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+        this.pageHideHandler = () => {
+          void this.incidentManager?.syncPendingIncidentDroppedEvents().catch(() => {});
+        };
+        this.beforeUnloadHandler = () => {
+          void this.incidentManager?.syncPendingIncidentDroppedEvents().catch(() => {});
+        };
+        window.addEventListener('pagehide', this.pageHideHandler);
+        window.addEventListener('beforeunload', this.beforeUnloadHandler);
+      }
+
+      if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+        this.visibilityChangeHandler = () => {
+          if (document.visibilityState === 'hidden') {
+            void this.incidentManager?.syncPendingIncidentDroppedEvents().catch(() => {});
+          }
+        };
+        document.addEventListener('visibilitychange', this.visibilityChangeHandler);
+      }
     } catch (err) {
       this.stateMachine.transition({
         type: 'DEGRADE',
@@ -556,11 +579,30 @@ export class FlightRecorderImpl implements FlightRecorder {
         }
       }
 
+      if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
+        if (this.pageHideHandler) {
+          window.removeEventListener('pagehide', this.pageHideHandler);
+          this.pageHideHandler = undefined;
+        }
+        if (this.beforeUnloadHandler) {
+          window.removeEventListener('beforeunload', this.beforeUnloadHandler);
+          this.beforeUnloadHandler = undefined;
+        }
+      }
+
+      if (typeof document !== 'undefined' && typeof document.removeEventListener === 'function') {
+        if (this.visibilityChangeHandler) {
+          document.removeEventListener('visibilitychange', this.visibilityChangeHandler);
+          this.visibilityChangeHandler = undefined;
+        }
+      }
+
       if (this.writer) {
         await this.writer.flush();
       }
       this.writer?.destroy();
       if (this.incidentManager) {
+        await this.incidentManager.syncPendingIncidentDroppedEvents().catch(() => {});
         await this.incidentManager.destroy();
       }
 

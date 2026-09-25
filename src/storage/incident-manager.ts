@@ -306,6 +306,32 @@ export class IncidentManager {
     return this.serializeOperation(op);
   }
 
+  private computeCurrentDroppedEvents(incident: StoredIncident): number {
+    const currentDropped = this.config.getDroppedEventsCount?.() ?? 0;
+    if (this.recoveredBaseIncidentId === incident.id) {
+      return this.baseRecoveredDroppedEvents + currentDropped;
+    }
+    if (typeof this.config.getDroppedEventsCount === 'function') {
+      return currentDropped;
+    }
+    return incident.droppedEvents ?? 0;
+  }
+
+  /**
+   * Sincroniza a contagem atual de eventos descartados no incidente pendente (se houver)
+   * antes de parar, descarregar a página ou executar retenção.
+   */
+  public syncPendingIncidentDroppedEvents(): Promise<void> {
+    return this.serializeOperation(async () => {
+      if (!this.pendingIncident) return;
+      const computedDropped = this.computeCurrentDroppedEvents(this.pendingIncident);
+      if (this.pendingIncident.droppedEvents !== computedDropped) {
+        this.pendingIncident.droppedEvents = computedDropped;
+        await this.db.putIncident(this.pendingIncident);
+      }
+    });
+  }
+
   /**
    * Associa todos os chunks persistidos da sessão atual ao incidente pendente (se houver),
    * garantindo que eles estejam protegidos no IndexedDB antes da execução de qualquer prune.
@@ -323,6 +349,12 @@ export class IncidentManager {
         existingIds.add(chunk.id);
         changed = true;
       }
+    }
+
+    const computedDropped = this.computeCurrentDroppedEvents(this.pendingIncident);
+    if (this.pendingIncident.droppedEvents !== computedDropped) {
+      this.pendingIncident.droppedEvents = computedDropped;
+      changed = true;
     }
 
     if (changed) {
@@ -470,11 +502,7 @@ export class IncidentManager {
     // Atualiza chunkIds associados e perdas conhecidas
     const sessionChunks = await this.db.getChunksBySession(this.sessionId);
     existing.chunkIds = Array.from(new Set([...existing.chunkIds, ...sessionChunks.map((c) => c.id)]));
-    const currentDropped = this.config.getDroppedEventsCount?.() ?? 0;
-    existing.droppedEvents =
-      this.recoveredBaseIncidentId === existing.id
-        ? this.baseRecoveredDroppedEvents + currentDropped
-        : (typeof this.config.getDroppedEventsCount === 'function' ? currentDropped : existing.droppedEvents);
+    existing.droppedEvents = this.computeCurrentDroppedEvents(existing);
 
     await this.db.putIncident(existing);
     return existing.id;
@@ -666,16 +694,7 @@ export class IncidentManager {
     incident.state = 'finalized';
     incident.finalizedAt = finalizedAt;
     incident.chunkIds = allChunkIds;
-    const currentDropped = this.config.getDroppedEventsCount?.() ?? 0;
-    if (this.recoveredBaseIncidentId === incidentId) {
-      // Incidente recuperado do banco pós-reload: preserva contagem persistida e soma perdas pós-reload
-      incident.droppedEvents = this.baseRecoveredDroppedEvents + currentDropped;
-    } else if (typeof this.config.getDroppedEventsCount === 'function') {
-      // Incidente criado no runtime atual: usa contagem atual
-      incident.droppedEvents = currentDropped;
-    } else if (incident.droppedEvents === undefined) {
-      incident.droppedEvents = 0;
-    }
+    incident.droppedEvents = this.computeCurrentDroppedEvents(incident);
 
     await this.db.putIncident(incident);
 
@@ -834,6 +853,14 @@ export class IncidentManager {
   }
 
   public async destroy(): Promise<void> {
+    if (this.pendingIncident && !this.isDestroyed) {
+      try {
+        await this.syncPendingIncidentDroppedEvents();
+      } catch {
+        // Ignora erro de sincronização ao destruir
+      }
+    }
+
     this.isDestroyed = true;
 
     if (this.activeOperation) {
