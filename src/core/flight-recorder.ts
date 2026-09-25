@@ -255,7 +255,6 @@ export class FlightRecorderImpl implements FlightRecorder {
         ...this.options.sessionOptions,
         ...(this.options.storage ? { storage: this.options.storage } : {})
       });
-      const environment = this.getEnvironmentMetadata();
 
       const existingChunks = await this.db.getChunksBySession(sessionCtx.sessionId);
       const lastTimelineSequence = Math.max(
@@ -300,7 +299,7 @@ export class FlightRecorderImpl implements FlightRecorder {
         this.db,
         sessionCtx.sessionId,
         sessionCtx.tabId,
-        environment,
+        () => this.getEnvironmentMetadata(),
         {
           afterErrorSeconds: this.options.afterErrorSeconds,
           recorderVersion: this.options.recorderVersion ?? '0.3.6',
@@ -615,8 +614,7 @@ export class FlightRecorderImpl implements FlightRecorder {
   public async getArtifact(incidentId: string): Promise<FlightRecorderArtifactV1> {
     if (!this.incidentManager) {
       // Instancia manager ad-hoc para exportar mesmo se parado
-      const env = this.getEnvironmentMetadata();
-      const mgr = new IncidentManager(this.db, '', '', env, {
+      const mgr = new IncidentManager(this.db, '', '', () => this.getEnvironmentMetadata(), {
         recorderVersion: this.options.recorderVersion ?? '0.3.6',
         getRecordingIssues: () => this.stateMachine.getDegradedReasons()
       });

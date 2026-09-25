@@ -7,6 +7,7 @@ import type {
 } from '../types/incident';
 import type { RrwebEvent, StoredChunk } from '../types/chunk';
 import type { FlightRecorderArtifactV1, EnvironmentMetadata } from '../types/artifact';
+import type { TimelineEvent, NavigationTimelineEvent } from '../types/timeline';
 import { sortTimelineEvents } from '../validation/validate';
 import { decompressGzip } from '../utils/compression';
 
@@ -119,7 +120,8 @@ export class IncidentManager {
   private db: FlightRecorderDB;
   private sessionId: string;
   private tabId: string;
-  private environment: EnvironmentMetadata;
+  private environmentProvider: () => EnvironmentMetadata;
+  private fallbackEnvironment: EnvironmentMetadata;
   private config: IncidentManagerConfig;
 
   private pendingIncident: StoredIncident | null = null;
@@ -135,17 +137,54 @@ export class IncidentManager {
     db: FlightRecorderDB,
     sessionId: string,
     tabId: string,
-    environment: EnvironmentMetadata,
+    environment: EnvironmentMetadata | (() => EnvironmentMetadata),
     config?: Partial<IncidentManagerConfig>
   ) {
     this.db = db;
     this.sessionId = sessionId;
     this.tabId = tabId;
-    this.environment = environment;
+    if (typeof environment === 'function') {
+      this.environmentProvider = environment;
+      this.fallbackEnvironment = {
+        url: typeof window !== 'undefined' ? window.location.href : 'http://localhost',
+        userAgent: typeof window !== 'undefined' ? window.navigator.userAgent : 'node',
+        viewport: {
+          width: typeof window !== 'undefined' ? window.innerWidth : 1280,
+          height: typeof window !== 'undefined' ? window.innerHeight : 720
+        }
+      };
+    } else {
+      this.fallbackEnvironment = environment;
+      this.environmentProvider = () => environment;
+    }
     this.config = {
       afterErrorSeconds: config?.afterErrorSeconds ?? 15,
       recorderVersion: config?.recorderVersion ?? '0.1.0',
       getRecordingIssues: config?.getRecordingIssues
+    };
+  }
+
+  private getEnvironment(): EnvironmentMetadata {
+    try {
+      return this.environmentProvider();
+    } catch {
+      return this.fallbackEnvironment;
+    }
+  }
+
+  private resolveFallbackEnvironment(
+    incident: StoredIncident,
+    timeline: TimelineEvent[]
+  ): EnvironmentMetadata {
+    const baseEnv = this.getEnvironment();
+    const navEvents = timeline.filter(
+      (e): e is NavigationTimelineEvent => e.type === 'navigation' && e.timestamp <= incident.triggeredAt
+    );
+    const lastNav = navEvents.length > 0 ? navEvents[navEvents.length - 1] : null;
+
+    return {
+      ...baseEnv,
+      url: lastNav ? lastNav.toUrl : baseEnv.url
     };
   }
 
@@ -266,7 +305,8 @@ export class IncidentManager {
         finalizeAt: now + this.config.afterErrorSeconds * 1000,
         state: 'pending',
         recordingIssues: this.config.getRecordingIssues?.() ?? [],
-        chunkIds: chunks.map((c) => c.id)
+        chunkIds: chunks.map((c) => c.id),
+        environment: this.getEnvironment()
       };
 
       this.pendingIncident = newIncident;
@@ -418,7 +458,8 @@ export class IncidentManager {
       finalizedAt: now,
       state: 'finalized',
       recordingIssues: this.config.getRecordingIssues?.() ?? [],
-      chunkIds: selectedChunks.map((c) => c.id)
+      chunkIds: selectedChunks.map((c) => c.id),
+      environment: this.getEnvironment()
     };
 
     await this.db.putIncident(incident);
@@ -568,7 +609,7 @@ export class IncidentManager {
           (incident.triggers?.find((t) => t.detail?.annotations)?.detail
             ?.annotations as Record<string, unknown>) || undefined
       },
-      environment: this.environment,
+      environment: incident.environment ?? this.resolveFallbackEnvironment(incident, filteredTimeline),
       timeline: filteredTimeline,
       replay: slicedReplay,
       diagnostics: {

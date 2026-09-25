@@ -1,3 +1,5 @@
+import type { EnvironmentMetadata } from './artifact';
+
 export type IncidentReason =
   | 'manual'
   | 'error'
@@ -26,6 +28,7 @@ export interface StoredIncident {
   state: 'pending' | 'finalized';
   chunkIds: string[];
   recordingIssues?: string[];
+  environment?: EnvironmentMetadata;
 }
 
 export interface IncidentSummary {

@@ -347,4 +347,31 @@ describe('Lote 2 — Sincronização de incident_pending com IncidentManager', (
 
     window.removeEventListener('unhandledrejection', unhandledSpy);
   });
+
+  it('ambiente do incidente exportado reflete o momento do erro mesmo após navegação subsequente e recorder parado', async () => {
+    // 1. Navega para /checkout antes do erro
+    window.history.pushState({}, '', '/checkout');
+
+    // 2. Dispara incidente na página /checkout
+    await recorder.captureException(new Error('Erro no checkout'));
+    expect(recorder.getHealth().state).toBe('incident_pending');
+
+    const incidents = await recorder.listIncidents();
+    expect(incidents.length).toBe(1);
+    const incidentId = incidents[0].id;
+
+    // 3. Usuário navega para /home
+    window.history.pushState({}, '', '/home');
+
+    // 4. Recorder é parado
+    await recorder.stop();
+    expect(recorder.getHealth().state).toBe('stopped');
+
+    // 5. Exporta o artefato após stop() e após a navegação
+    const artifact = await recorder.getArtifact(incidentId);
+
+    // O artefato deve registrar /checkout, NÃO /home
+    expect(artifact.environment.url).toContain('/checkout');
+    expect(artifact.environment.url).not.toContain('/home');
+  });
 });

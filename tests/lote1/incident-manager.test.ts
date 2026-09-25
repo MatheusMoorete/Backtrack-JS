@@ -576,6 +576,147 @@ describe('Lote 1 — IncidentManager e Exportação', () => {
     manager.destroy();
   });
 
+  it('persiste ambiente no momento da criação do incidente e usa na exportação mesmo se ambiente mudar', async () => {
+    let currentUrl = 'https://app.uticket.com.br/checkout';
+    const dynamicEnv = () => ({
+      url: currentUrl,
+      userAgent: 'TestBrowser/1.0',
+      viewport: { width: 1024, height: 768 }
+    });
+
+    const manager = new IncidentManager(db, 'sess_env', 'tab_env', dynamicEnv);
+
+    const chunk: StoredChunk = {
+      id: 'chk_env',
+      sessionId: 'sess_env',
+      tabId: 'tab_env',
+      sequence: 1,
+      startedAt: 1000,
+      endedAt: 2000,
+      sizeBytes: 100,
+      replay: [{ type: 2, data: {}, timestamp: 1000 }],
+      timeline: []
+    };
+    await db.putChunk(chunk);
+
+    const incidentId = await manager.trigger('manual', {
+      id: 'trig_env',
+      timestamp: 2000,
+      type: 'manual',
+      signature: 'manual'
+    });
+
+    const stored = await db.getIncident(incidentId);
+    expect(stored?.environment).toBeDefined();
+    expect(stored?.environment?.url).toBe('https://app.uticket.com.br/checkout');
+
+    // Simula navegação da aplicação para /home após o incidente
+    currentUrl = 'https://app.uticket.com.br/home';
+
+    // A exportação do artefato deve refletir o ambiente de quando o incidente ocorreu (/checkout)
+    const artifact = await manager.exportArtifact(incidentId);
+    expect(artifact.environment.url).toBe('https://app.uticket.com.br/checkout');
+
+    manager.destroy();
+  });
+
+  it('incidente legado sem environment recupera URL a partir do evento de navegação na timeline', async () => {
+    const chunk: StoredChunk = {
+      id: 'chk_legacy_nav',
+      sessionId: 'sess_leg',
+      tabId: 'tab_leg',
+      sequence: 1,
+      startedAt: 1000,
+      endedAt: 3000,
+      sizeBytes: 120,
+      replay: [{ type: 2, data: {}, timestamp: 1000 }],
+      timeline: [
+        {
+          id: 'nav_1',
+          timestamp: 1500,
+          sequence: 1,
+          type: 'navigation',
+          toUrl: 'https://app.uticket.com.br/event/123/tickets',
+          kind: 'pushState'
+        }
+      ]
+    };
+    await db.putChunk(chunk);
+
+    // Salva incidente diretamente sem campo environment (legado)
+    await db.putIncident({
+      id: 'inc_legacy',
+      sessionId: 'sess_leg',
+      tabId: 'tab_leg',
+      reason: 'error',
+      triggers: [
+        {
+          id: 'trig_leg',
+          timestamp: 2000,
+          type: 'error',
+          signature: 'error_sig'
+        }
+      ],
+      startedAt: 1000,
+      triggeredAt: 2000,
+      finalizeAt: 3000,
+      finalizedAt: 3000,
+      state: 'finalized',
+      chunkIds: ['chk_legacy_nav']
+    });
+
+    const manager = new IncidentManager(db, 'sess_leg', 'tab_leg', mockEnv);
+    const artifact = await manager.exportArtifact('inc_legacy');
+
+    // URL deve ser inferida da navegação da timeline e não do mockEnv atual
+    expect(artifact.environment.url).toBe('https://app.uticket.com.br/event/123/tickets');
+
+    manager.destroy();
+  });
+
+  it('incidente legado sem navegação na timeline faz fallback para o ambiente base', async () => {
+    const chunk: StoredChunk = {
+      id: 'chk_legacy_plain',
+      sessionId: 'sess_leg_plain',
+      tabId: 'tab_leg_plain',
+      sequence: 1,
+      startedAt: 1000,
+      endedAt: 2000,
+      sizeBytes: 100,
+      replay: [{ type: 2, data: {}, timestamp: 1000 }],
+      timeline: []
+    };
+    await db.putChunk(chunk);
+
+    await db.putIncident({
+      id: 'inc_legacy_plain',
+      sessionId: 'sess_leg_plain',
+      tabId: 'tab_leg_plain',
+      reason: 'error',
+      triggers: [
+        {
+          id: 'trig_plain',
+          timestamp: 1500,
+          type: 'error',
+          signature: 'sig'
+        }
+      ],
+      startedAt: 1000,
+      triggeredAt: 1500,
+      finalizeAt: 2000,
+      finalizedAt: 2000,
+      state: 'finalized',
+      chunkIds: ['chk_legacy_plain']
+    });
+
+    const manager = new IncidentManager(db, 'sess_leg_plain', 'tab_leg_plain', mockEnv);
+    const artifact = await manager.exportArtifact('inc_legacy_plain');
+
+    expect(artifact.environment.url).toBe(mockEnv.url);
+
+    manager.destroy();
+  });
+
   describe('sliceReplayEventsForWindow', () => {
     it('retorna array vazio quando recebe lista vazia', () => {
       expect(sliceReplayEventsForWindow([], 1000, 2000)).toEqual([]);
