@@ -8,7 +8,6 @@ export interface RetentionConfig {
 
 export interface PruneResult {
   deletedChunkIds: string[];
-  droppedEventsCount: number;
   reclaimedBytes: number;
   remainingBytes: number;
 }
@@ -16,7 +15,6 @@ export interface PruneResult {
 export class RetentionEngine {
   private db: FlightRecorderDB;
   private config: RetentionConfig;
-  private droppedEventsTotal = 0;
 
   constructor(db: FlightRecorderDB, config?: Partial<RetentionConfig>) {
     this.db = db;
@@ -24,10 +22,6 @@ export class RetentionEngine {
       bufferMinutes: config?.bufferMinutes ?? 5,
       maxStorageMb: config?.maxStorageMb ?? 50
     };
-  }
-
-  public getDroppedEventsTotal(): number {
-    return this.droppedEventsTotal;
   }
 
   /**
@@ -80,15 +74,11 @@ export class RetentionEngine {
     }
 
     const deletedChunkIds = toDelete.map((c) => c.id);
-    let droppedEventsCount = 0;
     let reclaimedBytes = 0;
 
     for (const chunk of toDelete) {
-      droppedEventsCount += (chunk.replay?.length || 0) + (chunk.timeline?.length || 0);
       reclaimedBytes += chunk.sizeBytes || 0;
     }
-
-    this.droppedEventsTotal += droppedEventsCount;
 
     if (deletedChunkIds.length > 0) {
       await this.db.deleteChunks(deletedChunkIds);
@@ -96,7 +86,6 @@ export class RetentionEngine {
 
     return {
       deletedChunkIds,
-      droppedEventsCount,
       reclaimedBytes,
       remainingBytes: currentBytes
     };
@@ -130,15 +119,11 @@ export class RetentionEngine {
     }
 
     const deletedChunkIds = toDelete.map((c) => c.id);
-    let droppedEventsCount = 0;
     let reclaimedBytes = 0;
 
     for (const chunk of toDelete) {
-      droppedEventsCount += (chunk.replay?.length || 0) + (chunk.timeline?.length || 0);
       reclaimedBytes += chunk.sizeBytes || 0;
     }
-
-    this.droppedEventsTotal += droppedEventsCount;
 
     if (deletedChunkIds.length > 0) {
       await this.db.deleteChunks(deletedChunkIds);
@@ -148,7 +133,6 @@ export class RetentionEngine {
 
     return {
       deletedChunkIds,
-      droppedEventsCount,
       reclaimedBytes,
       remainingBytes
     };

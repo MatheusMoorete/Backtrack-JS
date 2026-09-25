@@ -168,5 +168,32 @@ describe('Lote 1 — Motor de Retenção e Ring Buffer', () => {
     const result = await smallRetention.prune(now);
     // Deve remover o mais antigo (chunkA) primeiro para caber no limite
     expect(result.deletedChunkIds).toContain('chk_a_oldest');
+    expect(result.reclaimedBytes).toBe(120);
+    expect((result as unknown as Record<string, unknown>).droppedEventsCount).toBeUndefined();
+  });
+
+  it('não calcula métrica incorreta de descarte para chunks comprimidos com replay vazio', async () => {
+    const now = 1000000;
+    const oldCompressedChunk: StoredChunk = {
+      id: 'chk_compressed_old',
+      sessionId: 'sess_1',
+      tabId: 'tab_1',
+      sequence: 1,
+      startedAt: now - 10 * 60 * 1000,
+      endedAt: now - 9 * 60 * 1000,
+      sizeBytes: 1500,
+      replay: [],
+      replayCompressed: new Uint8Array([1, 2, 3, 4, 5]),
+      timeline: []
+    };
+
+    await db.putChunk(oldCompressedChunk);
+
+    const result = await retention.prune(now);
+    expect(result.deletedChunkIds).toContain('chk_compressed_old');
+    expect(result.reclaimedBytes).toBe(1500);
+    // droppedEventsCount e getDroppedEventsTotal foram removidos
+    expect((result as unknown as Record<string, unknown>).droppedEventsCount).toBeUndefined();
+    expect((retention as unknown as Record<string, unknown>).getDroppedEventsTotal).toBeUndefined();
   });
 });
