@@ -1,6 +1,6 @@
 {
   "name": "@backtrack/browser",
-  "version": "0.3.23",
+  "version": "0.3.24",
   "description": "Backtrack - Privacy-first client-side time travel & bug recording for web apps",
   "type": "module",
   "main": "./dist/index.cjs",

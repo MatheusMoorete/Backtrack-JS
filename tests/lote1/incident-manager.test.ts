@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 import { FlightRecorderDB } from '../../src/storage/db';
 import { IncidentManager, sliceReplayEventsForWindow } from '../../src/storage/incident-manager';
@@ -100,6 +100,70 @@ describe('Lote 1 — IncidentManager e Exportação', () => {
     expect(stored?.state).toBe('finalized');
 
     manager2.destroy();
+  });
+
+  it('dois gatilhos simultâneos são serializados e criam um único incidente compartilhado', async () => {
+    const manager = new IncidentManager(db, 'sess_simultaneous', 'tab_simultaneous', mockEnv, {
+      afterErrorSeconds: 0.15
+    });
+
+    const pendingCallbackSpy = vi.fn();
+    manager.setOnIncidentPending(pendingCallbackSpy);
+
+    // Insere um chunk inicial
+    await db.putChunk({
+      id: 'chk_sim_1',
+      sessionId: 'sess_simultaneous',
+      tabId: 'tab_simultaneous',
+      sequence: 1,
+      startedAt: 1000,
+      endedAt: 2000,
+      sizeBytes: 100,
+      replay: [],
+      timeline: []
+    });
+
+    const t1Promise = manager.trigger('http', {
+      id: 'trig_http_500',
+      timestamp: Date.now(),
+      type: 'http',
+      signature: 'HTTP 500: /api/checkout'
+    });
+
+    const t2Promise = manager.trigger('error', {
+      id: 'trig_js_error',
+      timestamp: Date.now(),
+      type: 'error',
+      signature: 'TypeError: Cannot read properties of undefined'
+    });
+
+    const [id1, id2] = await Promise.all([t1Promise, t2Promise]);
+
+    // Ambos devem retornar o mesmo incidentId
+    expect(id1).toBe(id2);
+
+    // Callback onIncidentPending deve ser executado apenas uma vez
+    expect(pendingCallbackSpy).toHaveBeenCalledTimes(1);
+
+    // Apenas 1 incidente no IndexedDB
+    const incidents = await db.getAllIncidents();
+    const sessionIncidents = incidents.filter((i) => i.sessionId === 'sess_simultaneous');
+    expect(sessionIncidents.length).toBe(1);
+
+    const stored = sessionIncidents[0];
+    expect(stored.id).toBe(id1);
+    expect(stored.state).toBe('pending');
+    expect(stored.triggers.length).toBe(2);
+    expect(stored.triggers[0].signature).toBe('HTTP 500: /api/checkout');
+    expect(stored.triggers[1].signature).toBe('TypeError: Cannot read properties of undefined');
+
+    // Aguarda a finalização
+    await sleep(250);
+
+    const finalized = await db.getIncident(id1);
+    expect(finalized?.state).toBe('finalized');
+
+    manager.destroy();
   });
 
   it('exporta incidente como artefato canônico v1 válido', async () => {

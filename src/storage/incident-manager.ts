@@ -128,6 +128,7 @@ export class IncidentManager {
   private onIncidentPendingCallback?: (incident: StoredIncident) => void;
   private onIncidentFinalizedCallback?: (incident: StoredIncident) => void;
   private beforeFinalizeCallback?: () => Promise<void>;
+  private activeOperation: Promise<unknown> | null = null;
 
   constructor(
     db: FlightRecorderDB,
@@ -145,6 +146,29 @@ export class IncidentManager {
       recorderVersion: config?.recorderVersion ?? '0.1.0',
       getRecordingIssues: config?.getRecordingIssues
     };
+  }
+
+  private serializeOperation<T>(op: () => Promise<T>): Promise<T> {
+    if (!this.activeOperation) {
+      const promise = op();
+      this.activeOperation = promise;
+      promise.finally(() => {
+        if (this.activeOperation === promise) {
+          this.activeOperation = null;
+        }
+      });
+      return promise;
+    }
+
+    const run = () => op();
+    const queued = this.activeOperation.then(run, run);
+    this.activeOperation = queued;
+    queued.finally(() => {
+      if (this.activeOperation === queued) {
+        this.activeOperation = null;
+      }
+    });
+    return queued;
   }
 
   public setOnIncidentPending(callback: (incident: StoredIncident) => void): void {
@@ -175,7 +199,7 @@ export class IncidentManager {
     const now = Date.now();
 
     if (now >= existing.finalizeAt) {
-      await this.finalize(existing.id);
+      await this.executeFinalize(existing.id);
     } else {
       const remainingMs = existing.finalizeAt - now;
       this.finalizeTimer = setTimeout(() => {
@@ -186,8 +210,19 @@ export class IncidentManager {
 
   /**
    * Registra um gatilho de incidente (automático ou manual).
+   * As chamadas são serializadas para evitar race conditions entre múltiplos erros concorrentes.
    */
-  public async trigger(
+  public trigger(
+    reason: IncidentReason,
+    triggerData: IncidentTrigger,
+    windowSeconds?: number
+  ): Promise<string> {
+    return this.serializeOperation(() =>
+      this.executeTrigger(reason, triggerData, windowSeconds)
+    );
+  }
+
+  private async executeTrigger(
     reason: IncidentReason,
     triggerData: IncidentTrigger,
     windowSeconds?: number
@@ -383,7 +418,13 @@ export class IncidentManager {
   /**
    * Finaliza um incidente pendente.
    */
-  public async finalize(incidentId: string): Promise<void> {
+  public finalize(incidentId: string): Promise<void> {
+    return this.serializeOperation(() =>
+      this.executeFinalize(incidentId)
+    );
+  }
+
+  private async executeFinalize(incidentId: string): Promise<void> {
     if (this.beforeFinalizeCallback) {
       try {
         await this.beforeFinalizeCallback();
@@ -531,7 +572,13 @@ export class IncidentManager {
     return this.db.listIncidents();
   }
 
-  public async deleteIncident(incidentId: string): Promise<void> {
+  public deleteIncident(incidentId: string): Promise<void> {
+    return this.serializeOperation(() =>
+      this.executeDeleteIncident(incidentId)
+    );
+  }
+
+  private async executeDeleteIncident(incidentId: string): Promise<void> {
     if (this.pendingIncident?.id === incidentId) {
       if (this.finalizeTimer) {
         clearTimeout(this.finalizeTimer);
@@ -547,5 +594,6 @@ export class IncidentManager {
       clearTimeout(this.finalizeTimer);
       this.finalizeTimer = null;
     }
+    this.pendingIncident = null;
   }
 }
