@@ -169,6 +169,10 @@ export class BatchWriter {
         let serializationMs = 0;
         let compressionMs = 0;
 
+        const timelineBytes = new TextEncoder().encode(
+          JSON.stringify(chunkCopy.timeline)
+        ).byteLength;
+
         if (chunkCopy.replay.length > 0) {
           try {
             const t0 = performance.now();
@@ -181,14 +185,17 @@ export class BatchWriter {
             compressionMs = t2 - t1;
 
             chunkCopy.replayCompressed = compressed;
-            chunkCopy.sizeBytes = compressed.byteLength + JSON.stringify(chunkCopy.timeline).length;
+            chunkCopy.sizeBytes = compressed.byteLength + timelineBytes;
             chunkCopy.replay = [];
           } catch {
             // Em caso de falha, mantém replay original
+            const replayBytes = new TextEncoder().encode(
+              JSON.stringify(chunkCopy.replay)
+            ).byteLength;
+            chunkCopy.sizeBytes = replayBytes + timelineBytes;
           }
-        }
-        if (chunkCopy.sizeBytes === 0) {
-          chunkCopy.sizeBytes = JSON.stringify(chunkCopy.timeline).length;
+        } else {
+          chunkCopy.sizeBytes = timelineBytes;
         }
         const tWriteStart = performance.now();
         await this.db.putChunk(chunkCopy);

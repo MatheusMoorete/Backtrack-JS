@@ -45,9 +45,12 @@ export class FlightRecorderImpl implements FlightRecorder {
 
   private sequence = 0;
   private retentionIntervalTimer: ReturnType<typeof setInterval> | null = null;
+  private retentionPromise: Promise<void> | null = null;
   private cachedStorageBytes = 0;
   private cachedIncidentCount = 0;
   private cachedProtectedBytes = 0;
+  private cachedBrowserEstimateBytes?: number;
+  private cachedBrowserQuotaBytes?: number;
 
   constructor(options?: FlightRecorderOptions, customDb?: FlightRecorderDB) {
     this.options = {
@@ -274,14 +277,24 @@ export class FlightRecorderImpl implements FlightRecorder {
           initialChunkSequence: lastChunkSequence
         },
         (err) => {
-          this.stateMachine.transition({
-            type: 'DEGRADE',
-            reason: err instanceof Error && err.name === 'QuotaExceededError'
-              ? 'A quota do navegador impediu a gravação de um lote.'
-              : 'Falha ao persistir um lote; a gravação pode estar incompleta.'
-          });
+          const isQuota =
+            (err instanceof Error && (err.name === 'QuotaExceededError' || err.message?.includes('QuotaExceededError'))) ||
+            (typeof DOMException !== 'undefined' && err instanceof DOMException && err.name === 'QuotaExceededError');
+
+          if (isQuota) {
+            this.handleQuotaExceeded();
+          } else {
+            this.stateMachine.transition({
+              type: 'DEGRADE',
+              reason: 'Falha ao persistir um lote; a gravação pode estar incompleta.'
+            });
+          }
         }
       );
+
+      this.writer.setOnChunkPersisted(() => {
+        this.scheduleRetention();
+      });
 
       this.incidentManager = new IncidentManager(
         this.db,
@@ -363,11 +376,9 @@ export class FlightRecorderImpl implements FlightRecorder {
         this.stateMachine.transition({ type: 'TRIGGER_AUTO' });
       }
 
-      // Inicia ciclo de retenção periódico (a cada 30 segundos)
+      // Inicia ciclo de retenção periódico como fallback (a cada 30 segundos)
       this.retentionIntervalTimer = setInterval(() => {
-        this.retention.prune().then(() => this.updateStatsCache()).catch(() => {
-          this.stateMachine.transition({ type: 'DEGRADE', reason: 'Falha na manutenção do armazenamento local.' });
-        });
+        this.scheduleRetention();
       }, 30000);
 
       this.updateStatsCache();
@@ -385,6 +396,49 @@ export class FlightRecorderImpl implements FlightRecorder {
     }
   }
 
+  private scheduleRetention(): Promise<void> | null {
+    if (this.retentionPromise) {
+      return this.retentionPromise;
+    }
+
+    this.retentionPromise = (async () => {
+      try {
+        await this.retention.prune();
+        await this.updateStatsCache();
+      } catch (err) {
+        this.stateMachine.transition({
+          type: 'DEGRADE',
+          reason: 'Falha na manutenção do armazenamento local.'
+        });
+      } finally {
+        this.retentionPromise = null;
+      }
+    })();
+
+    return this.retentionPromise;
+  }
+
+  private async handleQuotaExceeded(): Promise<void> {
+    try {
+      await this.retention.emergencyPrune();
+      await this.updateStatsCache();
+    } catch {
+      // Ignora erro no prune emergencial
+    }
+
+    const breakdown = await this.retention.getStorageBreakdown().catch(() => null);
+    const onlyProtectedRemains = breakdown ? breakdown.bufferBytes === 0 && breakdown.protectedBytes > 0 : false;
+
+    const reason = onlyProtectedRemains || breakdown?.protectedExceedsLimit
+      ? 'A quota do navegador foi excedida. Apenas conteúdo protegido permanece salvo; é necessário excluir incidentes ou limpar gravações para liberar espaço.'
+      : 'A quota do navegador impediu a gravação de um lote. Um prune emergencial de dados não protegidos foi executado.';
+
+    this.stateMachine.transition({
+      type: 'DEGRADE',
+      reason
+    });
+  }
+
   private async updateStatsCache(): Promise<void> {
     try {
       const breakdown = await this.retention.getStorageBreakdown();
@@ -392,11 +446,29 @@ export class FlightRecorderImpl implements FlightRecorder {
       this.cachedProtectedBytes = breakdown.protectedBytes;
       this.cachedIncidentCount = breakdown.incidentCount;
 
+      if (typeof navigator !== 'undefined' && navigator.storage && typeof navigator.storage.estimate === 'function') {
+        try {
+          const est = await navigator.storage.estimate();
+          this.cachedBrowserEstimateBytes = est.usage;
+          this.cachedBrowserQuotaBytes = est.quota;
+        } catch {
+          // Ignora erro na estimativa complementar
+        }
+      }
+
       if (breakdown.protectedExceedsLimit) {
         this.stateMachine.transition({
           type: 'DEGRADE',
           reason: 'O armazenamento protegido por incidentes excede o limite configurado (maxStorageMb).'
         });
+      } else if (!breakdown.isOverLimit && this.stateMachine.isDegraded()) {
+        const reasons = this.stateMachine.getDegradedReasons();
+        const onlyStorageReasons = reasons.every((r) =>
+          r.includes('maxStorageMb') || r.includes('quota') || r.includes('Quota') || r.includes('armazenamento')
+        );
+        if (onlyStorageReasons && reasons.length > 0) {
+          this.stateMachine.transition({ type: 'RECOVER' });
+        }
       }
     } catch {
       // Ignora erro ao atualizar cache de stats
@@ -601,13 +673,17 @@ export class FlightRecorderImpl implements FlightRecorder {
     const droppedEvents =
       this.rrwebCapturer?.getDroppedEventsCount() ?? 0;
 
+    const limitBytes = (this.options.maxStorageMb ?? 50) * 1024 * 1024;
     return {
       state: this.stateMachine.getState(),
       droppedEvents,
       storageBytes: this.cachedStorageBytes,
       protectedStorageBytes: this.cachedProtectedBytes,
-      storageLimitBytes: (this.options.maxStorageMb ?? 50) * 1024 * 1024,
-      storageLimitExceeded: this.cachedStorageBytes > (this.options.maxStorageMb ?? 50) * 1024 * 1024,
+      storageLimitBytes: limitBytes,
+      storageLimitExceeded: this.cachedStorageBytes > limitBytes,
+      protectedStorageExceeded: this.cachedProtectedBytes > limitBytes,
+      browserStorageEstimateBytes: this.cachedBrowserEstimateBytes,
+      browserStorageQuotaBytes: this.cachedBrowserQuotaBytes,
       pendingWrites: this.writer?.getPendingWrites() ?? 0,
       incidentCount: this.cachedIncidentCount,
       reasons: this.stateMachine.getDegradedReasons()

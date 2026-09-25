@@ -103,6 +103,58 @@ export class RetentionEngine {
   }
 
   /**
+   * Executa uma limpeza de emergência descartando todos os chunks não protegidos.
+   * Utilizado quando ocorre QuotaExceededError para liberar o máximo de espaço sem remover incidentes protegidos.
+   */
+  public async emergencyPrune(): Promise<PruneResult> {
+    const incidents = await this.db.getAllIncidents();
+    const protectedChunkIds = new Set<string>();
+
+    for (const inc of incidents) {
+      for (const cid of inc.chunkIds) {
+        protectedChunkIds.add(cid);
+      }
+    }
+
+    const allChunks = await this.db.getAllChunks();
+    const toDelete: StoredChunk[] = [];
+    const remaining: StoredChunk[] = [];
+
+    for (const chunk of allChunks) {
+      const isProtected = protectedChunkIds.has(chunk.id);
+      if (!isProtected) {
+        toDelete.push(chunk);
+      } else {
+        remaining.push(chunk);
+      }
+    }
+
+    const deletedChunkIds = toDelete.map((c) => c.id);
+    let droppedEventsCount = 0;
+    let reclaimedBytes = 0;
+
+    for (const chunk of toDelete) {
+      droppedEventsCount += (chunk.replay?.length || 0) + (chunk.timeline?.length || 0);
+      reclaimedBytes += chunk.sizeBytes || 0;
+    }
+
+    this.droppedEventsTotal += droppedEventsCount;
+
+    if (deletedChunkIds.length > 0) {
+      await this.db.deleteChunks(deletedChunkIds);
+    }
+
+    const remainingBytes = remaining.reduce((sum, c) => sum + (c.sizeBytes || 0), 0);
+
+    return {
+      deletedChunkIds,
+      droppedEventsCount,
+      reclaimedBytes,
+      remainingBytes
+    };
+  }
+
+  /**
    * Retorna o detalhamento do armazenamento entre buffer temporário e chunks protegidos por incidentes.
    */
   public async getStorageBreakdown(): Promise<StorageBreakdown> {

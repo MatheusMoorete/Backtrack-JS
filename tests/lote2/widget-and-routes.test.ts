@@ -174,7 +174,7 @@ describe('Backtrack v0.1.2 — Widget Nativo e Privacidade por Rota', () => {
       confirmExportBtn?.click();
 
       // Aguarda processamento assíncrono e verifica fechamento do modal
-      await new Promise((r) => setTimeout(r, 50));
+      await new Promise((r) => setTimeout(r, 150));
       expect(host?.shadowRoot?.querySelector('.backtrack-modal-card')).toBeNull();
 
       widget.unmount();

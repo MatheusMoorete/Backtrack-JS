@@ -20,6 +20,10 @@ export interface StoredChunk {
   sequence: number;
   startedAt: number;
   endedAt: number;
+  /**
+   * Estimativa de tamanho do chunk em bytes (payload comprimido do replay + bytes UTF-8 da timeline).
+   * É uma estimativa pois o overhead interno do IndexedDB não é mensurável dessa forma.
+   */
   sizeBytes: number;
   replay: RrwebEvent[];
   replayCompressed?: Uint8Array;

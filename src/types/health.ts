@@ -11,6 +11,9 @@ export interface RecorderHealth {
   protectedStorageBytes?: number;
   storageLimitBytes?: number;
   storageLimitExceeded?: boolean;
+  protectedStorageExceeded?: boolean;
+  browserStorageEstimateBytes?: number;
+  browserStorageQuotaBytes?: number;
   pendingWrites: number;
   incidentCount: number;
   reasons: string[];

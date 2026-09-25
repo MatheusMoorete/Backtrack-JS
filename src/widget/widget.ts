@@ -823,7 +823,7 @@ export class BacktrackWidget {
               <div class="backtrack-header-right">
                 <span
                   class="backtrack-storage-tooltip-trigger"
-                  title="${this.health?.protectedStorageBytes ? `${this.formatBytes(this.health.protectedStorageBytes)} protegidos. ` : ''}Dados protegidos contra a rotação automática de memória no IndexedDB (limite total de 50 MB)."
+                  title="${this.health?.protectedStorageBytes ? `${this.formatBytes(this.health.protectedStorageBytes)} protegidos. ` : ''}${this.health?.protectedStorageExceeded ? 'Limite excedido por incidentes protegidos. Exclua incidentes para liberar espaço. ' : ''}Dados protegidos contra a rotação automática de memória no IndexedDB (limite total de 50 MB)."
                   aria-label="Informações sobre dados protegidos no IndexedDB"
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -849,7 +849,11 @@ export class BacktrackWidget {
                       ? `
                     <div class="backtrack-header-menu">
                       <div class="backtrack-header-menu-info">
-                        Armazenamento: ${this.formatBytes(this.health?.storageBytes ?? 0)}
+                        Armazenamento: ${this.formatBytes(this.health?.storageBytes ?? 0)}${
+                          this.health?.browserStorageEstimateBytes
+                            ? ` (Navegador: ${this.formatBytes(this.health.browserStorageEstimateBytes)})`
+                            : ''
+                        }
                       </div>
                       <button type="button" class="backtrack-header-menu-item" id="btn-hide-widget">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
