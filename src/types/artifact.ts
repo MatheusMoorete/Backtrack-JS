@@ -34,11 +34,19 @@ export interface DiagnosticsMetadata {
   degradedReasons: string[];
 }
 
+export interface ReplayWindowMetadata {
+  requestedStartedAt: number;
+  requestedEndedAt: number;
+  preparationEventCount: number;
+  baseSnapshotOriginalTimestamp?: number;
+}
+
 export interface FlightRecorderArtifactV1 {
   formatVersion: 1;
   recorderVersion: string;
   incident: IncidentMetadata;
   environment: EnvironmentMetadata;
+  replayWindow?: ReplayWindowMetadata;
   timeline: TimelineEvent[];
   replay: RrwebEvent[];
   diagnostics: DiagnosticsMetadata;

@@ -3,6 +3,7 @@ import { IDBFactory } from 'fake-indexeddb';
 import { FlightRecorderDB } from '../../src/storage/db';
 import { IncidentManager, sliceReplayEventsForWindow } from '../../src/storage/incident-manager';
 import { validateFlightRecorderArtifact } from '../../src/validation/validate';
+import { compressGzip } from '../../src/utils/compression';
 import type { EnvironmentMetadata } from '../../src/types/artifact';
 import type { StoredChunk } from '../../src/types/chunk';
 
@@ -717,6 +718,271 @@ describe('Lote 1 — IncidentManager e Exportação', () => {
     manager.destroy();
   });
 
+  it('Chunk legado com apenas hasFullSnapshot não é considerado prova temporal para o corte', async () => {
+    // Chunk 1 com hasFullSnapshot: true mas sem replay nem timestamps recuperáveis
+    const chunk1: StoredChunk = {
+      id: 'chk_legacy_full',
+      sessionId: 'sess_proof',
+      tabId: 'tab_proof',
+      sequence: 1,
+      startedAt: 1000,
+      endedAt: 2000,
+      sizeBytes: 100,
+      hasFullSnapshot: true,
+      replay: [],
+      timeline: []
+    };
+
+    // Chunk 2 na janela
+    const chunk2: StoredChunk = {
+      id: 'chk_window',
+      sessionId: 'sess_proof',
+      tabId: 'tab_proof',
+      sequence: 2,
+      startedAt: 2000,
+      endedAt: 3000,
+      sizeBytes: 100,
+      replay: [{ type: 3, data: {}, timestamp: 2500 }],
+      timeline: []
+    };
+
+    await db.putChunk(chunk1);
+    await db.putChunk(chunk2);
+
+    const manager = new IncidentManager(db, 'sess_proof', 'tab_proof', mockEnv);
+    // Captura manual com janela de 1s (corte em 2000)
+    const incidentId = await manager.trigger(
+      'manual',
+      {
+        id: 'trig_proof',
+        timestamp: 3000,
+        type: 'manual',
+        signature: 'proof'
+      },
+      1
+    );
+
+    const stored = await db.getIncident(incidentId);
+    expect(stored?.recordingIssues).toContain(
+      'Ausência de prova temporal para snapshot em lote legado com hasFullSnapshot.'
+    );
+
+    const artifact = await manager.exportArtifact(incidentId);
+    expect(artifact.diagnostics.degraded).toBe(true);
+
+    manager.destroy();
+  });
+
+  it('duas capturas manuais no mesmo milissegundo geram IDs diferentes e persistem ambos os incidentes', async () => {
+    const manager = new IncidentManager(db, 'sess_duo', 'tab_duo', mockEnv);
+    const now = 1700000000000;
+
+    const p1 = manager.trigger('manual', {
+      id: 'trig_duo_1',
+      timestamp: now,
+      type: 'manual',
+      signature: 'sig_1'
+    });
+    const p2 = manager.trigger('manual', {
+      id: 'trig_duo_2',
+      timestamp: now,
+      type: 'manual',
+      signature: 'sig_2'
+    });
+
+    const [id1, id2] = await Promise.all([p1, p2]);
+
+    expect(id1).not.toBe(id2);
+
+    const inc1 = await db.getIncident(id1);
+    const inc2 = await db.getIncident(id2);
+    expect(inc1).not.toBeNull();
+    expect(inc2).not.toBeNull();
+    expect(inc1?.id).toBe(id1);
+    expect(inc2?.id).toBe(id2);
+
+    manager.destroy();
+  });
+
+  it('artefato distingue janela solicitada de eventos preparatórios através de replayWindow', async () => {
+    const manager = new IncidentManager(db, 'sess_prep', 'tab_prep', mockEnv);
+
+    // Chunk com Meta e FullSnapshot aos 1000ms, mutação aos 1500ms, e evento na janela aos 2500ms
+    const chunk: StoredChunk = {
+      id: 'chk_prep',
+      sessionId: 'sess_prep',
+      tabId: 'tab_prep',
+      sequence: 1,
+      startedAt: 1000,
+      endedAt: 3000,
+      sizeBytes: 150,
+      replay: [
+        { type: 4, data: { href: 'http://localhost/', width: 1920, height: 1080 }, timestamp: 1000 },
+        { type: 2, data: { node: { id: 1 } }, timestamp: 1005 },
+        { type: 3, data: { source: 1, d: 'mutation pre' }, timestamp: 1500 },
+        { type: 3, data: { source: 1, d: 'mutation in window' }, timestamp: 2500 }
+      ],
+      timeline: []
+    };
+    await db.putChunk(chunk);
+
+    // Janela solicitada de 1s: cutoff aos 2000ms (now=3000ms)
+    const incidentId = await manager.trigger(
+      'manual',
+      {
+        id: 'trig_prep',
+        timestamp: 3000,
+        type: 'manual',
+        signature: 'sig_prep'
+      },
+      1
+    );
+
+    const artifact = await manager.exportArtifact(incidentId);
+
+    expect(artifact.replayWindow).toBeDefined();
+    expect(artifact.replayWindow?.requestedStartedAt).toBe(2000);
+    expect(artifact.replayWindow?.requestedEndedAt).toBe(3000);
+    // Preparatórios: Meta (repositioned to 1999) + Snapshot (repositioned to 2000) + Mutation pre (repositioned to 2000) = 3
+    expect(artifact.replayWindow?.preparationEventCount).toBe(3);
+    expect(artifact.replayWindow?.baseSnapshotOriginalTimestamp).toBe(1005);
+
+    const valResult = validateFlightRecorderArtifact(artifact);
+    expect(valResult.success).toBe(true);
+
+    manager.destroy();
+  });
+
+  it('droppedEvents contém a contagem real conhecida provida por getDroppedEventsCount', async () => {
+    const manager = new IncidentManager(db, 'sess_drop', 'tab_drop', mockEnv, {
+      getDroppedEventsCount: () => 42
+    });
+
+    const chunk: StoredChunk = {
+      id: 'chk_drop',
+      sessionId: 'sess_drop',
+      tabId: 'tab_drop',
+      sequence: 1,
+      startedAt: 1000,
+      endedAt: 2000,
+      sizeBytes: 100,
+      replay: [{ type: 2, data: {}, timestamp: 1000 }],
+      timeline: []
+    };
+    await db.putChunk(chunk);
+
+    const incidentId = await manager.trigger('manual', {
+      id: 'trig_drop',
+      timestamp: 2000,
+      type: 'manual',
+      signature: 'drop'
+    });
+
+    const artifact = await manager.exportArtifact(incidentId);
+    expect(artifact.diagnostics.droppedEvents).toBe(42);
+
+    manager.destroy();
+  });
+
+  it('recorte positivo usando replay comprimido com gzip descomprime e preserva snapshot e mutações', async () => {
+    const manager = new IncidentManager(db, 'sess_gzip', 'tab_gzip', mockEnv);
+
+    const originalReplay = [
+      { type: 4, data: { href: 'http://localhost/', width: 1920, height: 1080 }, timestamp: 1000 },
+      { type: 2, data: { node: { id: 1 } }, timestamp: 1005 },
+      { type: 3, data: { source: 1, d: 'compressed mutation 1' }, timestamp: 1500 },
+      { type: 3, data: { source: 1, d: 'compressed mutation 2' }, timestamp: 2500 }
+    ];
+
+    const compressed = await compressGzip(JSON.stringify(originalReplay));
+
+    const chunk: StoredChunk = {
+      id: 'chk_gzip',
+      sessionId: 'sess_gzip',
+      tabId: 'tab_gzip',
+      sequence: 1,
+      startedAt: 1000,
+      endedAt: 3000,
+      sizeBytes: compressed.byteLength,
+      replay: [],
+      replayCompressed: compressed,
+      timeline: []
+    };
+    await db.putChunk(chunk);
+
+    // Janela de 1s (corte em 2000ms até 3000ms)
+    const incidentId = await manager.trigger(
+      'manual',
+      {
+        id: 'trig_gzip',
+        timestamp: 3000,
+        type: 'manual',
+        signature: 'sig_gzip'
+      },
+      1
+    );
+
+    const artifact = await manager.exportArtifact(incidentId);
+
+    expect(artifact.replay.length).toBe(4);
+    expect(artifact.replay[0].type).toBe(4);
+    expect(artifact.replay[0].timestamp).toBe(1999);
+    expect(artifact.replay[1].type).toBe(2);
+    expect(artifact.replay[1].timestamp).toBe(2000);
+    expect(artifact.replay[2].data).toEqual({ source: 1, d: 'compressed mutation 1' });
+    expect(artifact.replay[2].timestamp).toBe(2000);
+    expect(artifact.replay[3].data).toEqual({ source: 1, d: 'compressed mutation 2' });
+    expect(artifact.replay[3].timestamp).toBe(2500);
+
+    const valResult = validateFlightRecorderArtifact(artifact);
+    expect(valResult.success).toBe(true);
+
+    manager.destroy();
+  });
+
+  it('reload depois do prazo finaliza incidente automático real sem estender artificialmente a duração', async () => {
+    const fixedNow = 1700000000000;
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    vi.setSystemTime(fixedNow);
+
+    // 1. Instância 1 dispara um incidente automático com prazo de 10 segundos
+    const manager1 = new IncidentManager(db, 'sess_reload_auto', 'tab_reload_auto', mockEnv, {
+      afterErrorSeconds: 10
+    });
+
+    const incidentId = await manager1.trigger('error', {
+      id: 'trig_auto_reload',
+      timestamp: fixedNow,
+      type: 'error',
+      signature: 'TypeError: auto reload test'
+    });
+
+    const storedPending = await db.getIncident(incidentId);
+    expect(storedPending?.state).toBe('pending');
+    expect(storedPending?.finalizeAt).toBe(fixedNow + 10000);
+
+    // Simula destruição da aba (reload)
+    manager1.destroy();
+
+    // 2. O usuário recarrega a página 15 segundos após o erro (já expirou os 10s)
+    vi.setSystemTime(fixedNow + 15000);
+
+    const manager2 = new IncidentManager(db, 'sess_reload_auto', 'tab_reload_auto', mockEnv, {
+      afterErrorSeconds: 10
+    });
+
+    // init() deve detectar que o prazo venceu durante a ausência da aba e finalizar imediatamente
+    await manager2.init();
+
+    const storedFinal = await db.getIncident(incidentId);
+    expect(storedFinal?.state).toBe('finalized');
+    // finalizedAt não deve ser o momento do reload (15s), mas sim clampado em finalizeAt (10s)!
+    expect(storedFinal?.finalizedAt).toBe(fixedNow + 10000);
+
+    manager2.destroy();
+    vi.useRealTimers();
+  });
+
   describe('sliceReplayEventsForWindow', () => {
     it('retorna array vazio quando recebe lista vazia', () => {
       expect(sliceReplayEventsForWindow([], 1000, 2000)).toEqual([]);
@@ -806,6 +1072,21 @@ describe('Lote 1 — IncidentManager e Exportação', () => {
       expect(sliced[2].data).toEqual({ d: 'mut 1' });
       expect(sliced[3].type).toBe(2);
       expect(sliced[3].data).toEqual({ node: 'root 2' });
+    });
+
+    it('Meta posterior ao corte não é movido para o início e replay não fabrica contexto temporal', () => {
+      const events = [
+        { type: 3, data: { d: 'mutation within window' }, timestamp: 2500 },
+        { type: 4, data: { width: 1920, height: 1080 }, timestamp: 3500 } // Meta futuro (> 3000)
+      ];
+
+      // Janela de 2000 a 3000 (sem snapshot e sem Meta anterior)
+      const sliced = sliceReplayEventsForWindow(events, 2000, 3000);
+
+      // O Meta em 3500 NÃO pode ser movido para 1999 (startedAt - 1)
+      expect(sliced.some((e) => e.type === 4 && e.timestamp < 2000)).toBe(false);
+      expect(sliced.length).toBe(1);
+      expect(sliced[0].timestamp).toBe(2500);
     });
   });
 });

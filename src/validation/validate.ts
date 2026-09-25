@@ -144,6 +144,27 @@ export function validateFlightRecorderArtifact(input: unknown): ValidationResult
     }
   }
 
+  // 4.1 replayWindow (opcional)
+  if (obj.replayWindow !== undefined) {
+    if (!isRecord(obj.replayWindow)) {
+      errors.push('Campo inválido em replayWindow: objeto esperado.');
+    } else {
+      const rw = obj.replayWindow as Record<string, unknown>;
+      if (!finite(rw.requestedStartedAt)) {
+        errors.push('Campo obrigatório ausente ou inválido em replayWindow: "requestedStartedAt".');
+      }
+      if (!finite(rw.requestedEndedAt)) {
+        errors.push('Campo obrigatório ausente ou inválido em replayWindow: "requestedEndedAt".');
+      }
+      if (typeof rw.preparationEventCount !== 'number' || rw.preparationEventCount < 0) {
+        errors.push('Campo obrigatório ausente ou inválido em replayWindow: "preparationEventCount".');
+      }
+      if (rw.baseSnapshotOriginalTimestamp !== undefined && !finite(rw.baseSnapshotOriginalTimestamp)) {
+        errors.push('Campo inválido em replayWindow: "baseSnapshotOriginalTimestamp" deve ser numérico.');
+      }
+    }
+  }
+
   // 5. timeline
   if (!Array.isArray(obj.timeline)) {
     errors.push('Campo obrigatório ausente ou inválido: "timeline" (array esperado).');

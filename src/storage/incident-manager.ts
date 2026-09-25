@@ -6,7 +6,7 @@ import type {
   IncidentSummary
 } from '../types/incident';
 import type { RrwebEvent, StoredChunk } from '../types/chunk';
-import type { FlightRecorderArtifactV1, EnvironmentMetadata } from '../types/artifact';
+import type { FlightRecorderArtifactV1, EnvironmentMetadata, ReplayWindowMetadata } from '../types/artifact';
 import type { TimelineEvent, NavigationTimelineEvent } from '../types/timeline';
 import { sortTimelineEvents } from '../validation/validate';
 import { decompressGzip } from '../utils/compression';
@@ -18,19 +18,44 @@ export interface IncidentManagerConfig {
   getDroppedEventsCount?: () => number;
 }
 
+export function generateIncidentId(prefix: 'inc' | 'inc_manual', sessionId: string, timestamp: number): string {
+  const uuid =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : Math.random().toString(36).substring(2, 10);
+  return `${prefix}_${sessionId}_${timestamp}_${uuid}`;
+}
+
+export interface SlicedReplayResult {
+  events: RrwebEvent[];
+  replayWindow: ReplayWindowMetadata;
+  degradedReasons: string[];
+}
+
 /**
  * Fatia e ajusta os eventos de replay para que caibam estritamente na janela [startedAt, finalizedAt],
  * garantindo que o FullSnapshot inicial (type: 2) mais recente seja reposicionado no início
- * da janela (com seu Meta type: 4 correspondente). Isso evita que o player apresente tela em branco
- * e garante que a duração do replay corresponda com exatidão à duração solicitada.
+ * da janela (com seu Meta type: 4 correspondente).
+ *
+ * Também gera metadados explícitos da janela de replay (replayWindow) para diferenciar eventos
+ * preparatórios de eventos reais da janela solicitada.
  */
-export function sliceReplayEventsForWindow(
+export function sliceReplayEventsWithMetadata(
   events: RrwebEvent[],
   startedAt: number,
   finalizedAt: number
-): RrwebEvent[] {
+): SlicedReplayResult {
+  const degradedReasons: string[] = [];
   if (!events || events.length === 0) {
-    return [];
+    return {
+      events: [],
+      replayWindow: {
+        requestedStartedAt: startedAt,
+        requestedEndedAt: finalizedAt,
+        preparationEventCount: 0
+      },
+      degradedReasons
+    };
   }
 
   // Ordena por timestamp
@@ -47,23 +72,49 @@ export function sliceReplayEventsForWindow(
   const baseSnapshot = priorSnapshots.length > 0 ? priorSnapshots[priorSnapshots.length - 1] : null;
 
   if (!baseSnapshot) {
+    degradedReasons.push('Não há snapshot para reconstruir o início da gravação.');
+
     // Se não encontrou snapshot anterior ou em startedAt, busca ao menos o Meta (type: 4) anterior
-    // caso a janela não possua nenhum evento Meta para dimensões de tela
-    if (!inWindow.some((e) => e.type === 4)) {
-      const firstMeta = sorted.find((e) => e.type === 4);
-      if (firstMeta) {
-        return [{ ...firstMeta, timestamp: startedAt - 1 }, ...inWindow];
+    // caso a janela não possua nenhum evento Meta para dimensões de tela.
+    // NUNCA seleciona Meta futuro (> startedAt), para não fabricar contexto temporal!
+    let prepCount = 0;
+    const windowHasMeta = inWindow.some((e) => e.type === 4);
+    if (!windowHasMeta) {
+      const priorMetas = sorted.filter((e) => e.type === 4 && e.timestamp <= startedAt);
+      const priorMeta = priorMetas.length > 0 ? priorMetas[priorMetas.length - 1] : null;
+      if (priorMeta) {
+        prepCount = 1;
+        return {
+          events: [{ ...priorMeta, timestamp: startedAt - 1 }, ...inWindow],
+          replayWindow: {
+            requestedStartedAt: startedAt,
+            requestedEndedAt: finalizedAt,
+            preparationEventCount: prepCount
+          },
+          degradedReasons
+        };
+      } else {
+        degradedReasons.push('Não há evento de metadados (Meta) anterior ao início da gravação.');
       }
     }
-    return inWindow;
+
+    return {
+      events: inWindow,
+      replayWindow: {
+        requestedStartedAt: startedAt,
+        requestedEndedAt: finalizedAt,
+        preparationEventCount: prepCount
+      },
+      degradedReasons
+    };
   }
 
   // Índice do snapshot base no array ordenado
   const baseSnapshotIndex = sorted.lastIndexOf(baseSnapshot);
 
-  // Busca o evento Meta (type: 4) mais recente anterior ou junto do snapshot
+  // Busca o evento Meta (type: 4) mais recente anterior ou junto do snapshot e antes de startedAt
   const priorMetas = sorted.filter(
-    (e, idx) => e.type === 4 && idx <= baseSnapshotIndex
+    (e, idx) => e.type === 4 && idx <= baseSnapshotIndex && e.timestamp <= startedAt
   );
   const baseMeta = priorMetas.length > 0 ? priorMetas[priorMetas.length - 1] : null;
 
@@ -80,12 +131,14 @@ export function sliceReplayEventsForWindow(
     );
 
   const result: RrwebEvent[] = [];
+  let preparationCount = 0;
 
   if (baseMeta) {
     result.push({
       ...baseMeta,
       timestamp: startedAt - 1
     });
+    preparationCount++;
   }
 
   // Snapshot reposicionado exatamente no início da janela
@@ -93,6 +146,7 @@ export function sliceReplayEventsForWindow(
     ...baseSnapshot,
     timestamp: startedAt
   });
+  preparationCount++;
 
   // Mutações intermediárias aplicadas no frame inicial (startedAt) para reconstituir o DOM fielmente
   for (const ev of intermediateMutations) {
@@ -100,6 +154,7 @@ export function sliceReplayEventsForWindow(
       ...ev,
       timestamp: startedAt
     });
+    preparationCount++;
   }
 
   // Eventos incrementais ocorridos dentro da janela
@@ -113,7 +168,24 @@ export function sliceReplayEventsForWindow(
     result.push(ev);
   }
 
-  return result;
+  return {
+    events: result,
+    replayWindow: {
+      requestedStartedAt: startedAt,
+      requestedEndedAt: finalizedAt,
+      preparationEventCount: preparationCount,
+      baseSnapshotOriginalTimestamp: baseSnapshot.timestamp
+    },
+    degradedReasons
+  };
+}
+
+export function sliceReplayEventsForWindow(
+  events: RrwebEvent[],
+  startedAt: number,
+  finalizedAt: number
+): RrwebEvent[] {
+  return sliceReplayEventsWithMetadata(events, startedAt, finalizedAt).events;
 }
 
 export class IncidentManager {
@@ -160,7 +232,8 @@ export class IncidentManager {
     this.config = {
       afterErrorSeconds: config?.afterErrorSeconds ?? 15,
       recorderVersion: config?.recorderVersion ?? '0.1.0',
-      getRecordingIssues: config?.getRecordingIssues
+      getRecordingIssues: config?.getRecordingIssues,
+      getDroppedEventsCount: config?.getDroppedEventsCount
     };
   }
 
@@ -290,7 +363,7 @@ export class IncidentManager {
 
     // Captura automática
     if (!this.pendingIncident) {
-      const incidentId = `inc_${this.sessionId}_${now}`;
+      const incidentId = generateIncidentId('inc', this.sessionId, now);
       const chunks = await this.db.getChunksBySession(this.sessionId);
       const startedAt = chunks.length > 0 ? chunks[0].startedAt : now;
 
@@ -358,25 +431,32 @@ export class IncidentManager {
 
   /**
    * Obtém os timestamps reais de todos os FullSnapshots (rrweb type: 2) de um chunk.
+   * Não fabrica timestamps usando chunk.startedAt quando apenas a flag hasFullSnapshot está presente.
    */
-  private async getChunkSnapshotTimestamps(chunk: StoredChunk): Promise<number[]> {
+  private async getChunkSnapshotTimestamps(
+    chunk: StoredChunk,
+    onMissingTemporalProof?: () => void
+  ): Promise<number[]> {
     if (chunk.snapshotTimestamps && chunk.snapshotTimestamps.length > 0) {
       return chunk.snapshotTimestamps;
     }
     if (chunk.replay && chunk.replay.length > 0) {
-      return chunk.replay.filter((r) => r.type === 2).map((r) => r.timestamp);
+      const timestamps = chunk.replay.filter((r) => r.type === 2).map((r) => r.timestamp);
+      if (timestamps.length > 0) return timestamps;
     }
     if (chunk.replayCompressed && chunk.replayCompressed.length > 0) {
       try {
         const text = await decompressGzip(chunk.replayCompressed);
         const events = JSON.parse(text) as RrwebEvent[];
-        return events.filter((r) => r.type === 2).map((r) => r.timestamp);
+        const timestamps = events.filter((r) => r.type === 2).map((r) => r.timestamp);
+        if (timestamps.length > 0) return timestamps;
       } catch {
-        return [];
+        // Ignora erro aqui
       }
     }
     if (chunk.hasFullSnapshot) {
-      return [chunk.startedAt];
+      // Chunk legado possui flag hasFullSnapshot, mas não possui prova temporal de quando o snapshot ocorreu
+      onMissingTemporalProof?.();
     }
     return [];
   }
@@ -386,13 +466,14 @@ export class IncidentManager {
     now: number,
     windowSeconds?: number
   ): Promise<string> {
-    const incidentId = `inc_manual_${this.sessionId}_${now}`;
+    const incidentId = generateIncidentId('inc_manual', this.sessionId, now);
     const chunks = await this.db.getChunksBySession(this.sessionId);
     chunks.sort((a, b) => (a.startedAt !== b.startedAt ? a.startedAt - b.startedAt : a.sequence - b.sequence));
 
     const sessionStartedAt = chunks.length > 0 ? chunks[0].startedAt : now;
     let selectedChunks = chunks;
     let startedAt = sessionStartedAt;
+    let hasUnprovenTemporalChunk = false;
 
     if (windowSeconds && windowSeconds > 0) {
       const windowMs = windowSeconds * 1000;
@@ -401,7 +482,11 @@ export class IncidentManager {
 
       // Obtém os timestamps reais de FullSnapshot de cada chunk
       const chunkSnapshots = await Promise.all(
-        chunks.map((c) => this.getChunkSnapshotTimestamps(c))
+        chunks.map((c) =>
+          this.getChunkSnapshotTimestamps(c, () => {
+            hasUnprovenTemporalChunk = true;
+          })
+        )
       );
 
       // Chunks que intersectam a janela solicitada [cutoff, now]
@@ -446,6 +531,11 @@ export class IncidentManager {
       }
     }
 
+    const recordingIssues = [...(this.config.getRecordingIssues?.() ?? [])];
+    if (hasUnprovenTemporalChunk) {
+      recordingIssues.push('Ausência de prova temporal para snapshot em lote legado com hasFullSnapshot.');
+    }
+
     const incident: StoredIncident = {
       id: incidentId,
       sessionId: this.sessionId,
@@ -457,7 +547,7 @@ export class IncidentManager {
       finalizeAt: now,
       finalizedAt: now,
       state: 'finalized',
-      recordingIssues: this.config.getRecordingIssues?.() ?? [],
+      recordingIssues,
       chunkIds: selectedChunks.map((c) => c.id),
       environment: this.getEnvironment()
     };
@@ -578,14 +668,14 @@ export class IncidentManager {
         })
       )
     ).flat();
-    const slicedReplay = sliceReplayEventsForWindow(
+    const { events: slicedReplay, replayWindow, degradedReasons: replayIssues } = sliceReplayEventsWithMetadata(
       rawReplay,
       incident.startedAt,
       incident.finalizedAt ?? incident.finalizeAt
     );
 
-    if (!slicedReplay.some((event) => event.type === 2 && event.timestamp <= incident.startedAt)) {
-      issues.add('Não há snapshot para reconstruir o início da gravação.');
+    for (const rIssue of replayIssues) {
+      issues.add(rIssue);
     }
 
     const totalStorageBytes = chunks.reduce((acc, c) => acc + (c.sizeBytes || 0), 0);
@@ -610,6 +700,7 @@ export class IncidentManager {
             ?.annotations as Record<string, unknown>) || undefined
       },
       environment: incident.environment ?? this.resolveFallbackEnvironment(incident, filteredTimeline),
+      replayWindow,
       timeline: filteredTimeline,
       replay: slicedReplay,
       diagnostics: {
