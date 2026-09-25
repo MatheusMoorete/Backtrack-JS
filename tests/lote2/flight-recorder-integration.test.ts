@@ -374,4 +374,108 @@ describe('Lote 2 — Sincronização de incident_pending com IncidentManager', (
     expect(artifact.environment.url).toContain('/checkout');
     expect(artifact.environment.url).not.toContain('/home');
   });
+
+  it('retenção disparada por flush não apaga chunks da captura manual mesmo com limite de armazenamento estrito', async () => {
+    await recorder.stop();
+    const tightRecorder = new FlightRecorderImpl(
+      {
+        bufferMinutes: 5,
+        maxStorageMb: 0.0001,
+        afterErrorSeconds: 10,
+        sessionOptions: { disableBroadcastChannel: true }
+      },
+      db
+    );
+    await tightRecorder.start();
+
+    const incidentId = await tightRecorder.capture('captura_com_retencao');
+
+    const incident = await db.getIncident(incidentId);
+    expect(incident).not.toBeNull();
+    expect(incident?.chunkIds.length).toBeGreaterThan(0);
+
+    const chunks = await db.getChunksByIds(incident!.chunkIds);
+    expect(chunks.length).toBe(incident!.chunkIds.length);
+
+    await tightRecorder.stop();
+  });
+
+  it('clear() cancela incidente pendente em memória, timer e retorna recorder para recording', async () => {
+    await recorder.captureException(new Error('Erro pendente para clear'));
+    expect(recorder.getHealth().state).toBe('incident_pending');
+
+    await recorder.clear();
+
+    expect(recorder.getHealth().state).toBe('recording');
+    const incidents = await recorder.listIncidents();
+    expect(incidents.length).toBe(0);
+
+    // Avança o relógio além do deadline original de 10s
+    await vi.advanceTimersByTimeAsync(12000);
+
+    expect(recorder.getHealth().state).toBe('recording');
+    const incidentsAfter = await recorder.listIncidents();
+    expect(incidentsAfter.length).toBe(0);
+  });
+
+  it('falha no timer de finalização não gera unhandledrejection', async () => {
+    let unhandledReceived = false;
+    const rejectionHandler = () => {
+      unhandledReceived = true;
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('unhandledrejection', rejectionHandler);
+    }
+    process.on('unhandledRejection', rejectionHandler);
+
+    try {
+      await recorder.captureException(new Error('Erro para teste de timer falho'));
+      expect(recorder.getHealth().state).toBe('incident_pending');
+
+      vi.spyOn(db, 'getIncident').mockRejectedValueOnce(new Error('Erro simulado de IndexedDB durante timer'));
+
+      await vi.advanceTimersByTimeAsync(12000);
+
+      expect(unhandledReceived).toBe(false);
+    } finally {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('unhandledrejection', rejectionHandler);
+      }
+      process.off('unhandledRejection', rejectionHandler);
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('droppedEvents é persistido no incidente e retém o valor real após stop()', async () => {
+    (recorder as any).rrwebCapturer = {
+      getDroppedEventsCount: () => 42,
+      stop: () => {}
+    };
+
+    const incidentId = await recorder.capture('teste_dropped_persisted');
+
+    const artifactActive = await recorder.getArtifact(incidentId);
+    expect(artifactActive.diagnostics.droppedEvents).toBe(42);
+
+    await recorder.stop();
+
+    const artifactAfterStop = await recorder.getArtifact(incidentId);
+    expect(artifactAfterStop.diagnostics.droppedEvents).toBe(42);
+  });
+
+  it('stop() aguarda gatilhos assíncronos em andamento e fecha BroadcastChannels', async () => {
+    let triggerCompleted = false;
+
+    const capturePromise = recorder.captureException(new Error('Erro durante stop'));
+    void (async () => {
+      await capturePromise;
+      triggerCompleted = true;
+    })();
+
+    await recorder.stop();
+
+    expect(triggerCompleted).toBe(true);
+    expect(recorder.getHealth().state).toBe('stopped');
+  });
 });

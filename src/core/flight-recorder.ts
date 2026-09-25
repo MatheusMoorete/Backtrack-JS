@@ -2,7 +2,7 @@ import { FlightRecorderDB } from '../storage/db';
 import { BatchWriter } from '../storage/batch-writer';
 import { RetentionEngine } from '../storage/retention';
 import { IncidentManager } from '../storage/incident-manager';
-import { claimSessionContext } from '../storage/session';
+import { claimSessionContext, closeSessionChannel } from '../storage/session';
 import { RecorderStateMachine } from './state-machine';
 
 import { ConsoleCapturer } from '../capturers/console';
@@ -417,8 +417,16 @@ export class FlightRecorderImpl implements FlightRecorder {
 
     this.retentionPromise = (async () => {
       try {
-        await this.retention.prune();
-        await this.updateStatsCache();
+        if (this.incidentManager) {
+          await this.incidentManager.runExclusive(async () => {
+            await this.incidentManager?.protectSessionChunks();
+            await this.retention.prune();
+            await this.updateStatsCache();
+          });
+        } else {
+          await this.retention.prune();
+          await this.updateStatsCache();
+        }
       } catch (err) {
         this.stateMachine.transition({
           type: 'DEGRADE',
@@ -434,8 +442,16 @@ export class FlightRecorderImpl implements FlightRecorder {
 
   private async handleQuotaExceeded(): Promise<void> {
     try {
-      await this.retention.emergencyPrune();
-      await this.updateStatsCache();
+      if (this.incidentManager) {
+        await this.incidentManager.runExclusive(async () => {
+          await this.incidentManager?.protectSessionChunks();
+          await this.retention.emergencyPrune();
+          await this.updateStatsCache();
+        });
+      } else {
+        await this.retention.emergencyPrune();
+        await this.updateStatsCache();
+      }
     } catch {
       // Ignora erro no prune emergencial
     }
@@ -532,11 +548,23 @@ export class FlightRecorderImpl implements FlightRecorder {
         FlightRecorderImpl.activeInstance = null;
       }
 
+      if (this.retentionPromise) {
+        try {
+          await this.retentionPromise;
+        } catch {
+          // Ignora
+        }
+      }
+
       if (this.writer) {
         await this.writer.flush();
       }
       this.writer?.destroy();
-      this.incidentManager?.destroy();
+      if (this.incidentManager) {
+        await this.incidentManager.destroy();
+      }
+
+      closeSessionChannel();
 
       this.clearRuntimeReferences();
       this.stateMachine.transition({ type: 'STOP' });
@@ -558,37 +586,38 @@ export class FlightRecorderImpl implements FlightRecorder {
       throw new Error('FlightRecorder não está em execução.');
     }
 
-    const now = Date.now();
+    const incidentId = await this.incidentManager.runExclusive(async () => {
+      const now = Date.now();
 
-    // Registra marcador da captura manual na timeline
-    this.writer.addTimelineEvent({
-      id: `marker_manual_${now}`,
-      timestamp: now,
-      sequence: this.nextSequence(),
-      type: 'marker',
-      label: `Captura manual: ${reason}`
-    });
-
-    // Flush antes de capturar para garantir integridade e persistência do chunk ativo
-    await this.writer.flush();
-
-    const incidentId = await this.incidentManager.trigger(
-      'manual',
-      {
-        id: `trig_manual_${now}`,
+      // Registra marcador da captura manual na timeline
+      this.writer!.addTimelineEvent({
+        id: `marker_manual_${now}`,
         timestamp: now,
-        type: 'manual',
-        signature: `manual_capture_${reason}`,
-        detail: {
-          userReason: reason,
-          windowSeconds,
-          annotationImage: options?.annotationImage,
-          notes: options?.notes,
-          annotations: options?.annotations
-        }
-      },
-      windowSeconds
-    );
+        sequence: this.nextSequence(),
+        type: 'marker',
+        label: `Captura manual: ${reason}`
+      });
+
+      // Flush antes de capturar para garantir integridade e persistência do chunk ativo
+      await this.writer!.flush();
+
+      return this.incidentManager!.executeManualTrigger(
+        {
+          id: `trig_manual_${now}`,
+          timestamp: now,
+          type: 'manual',
+          signature: `manual_capture_${reason}`,
+          detail: {
+            userReason: reason,
+            windowSeconds,
+            annotationImage: options?.annotationImage,
+            notes: options?.notes,
+            annotations: options?.annotations
+          }
+        },
+        windowSeconds
+      );
+    });
 
     await this.updateStatsCache();
     return incidentId;
@@ -669,13 +698,36 @@ export class FlightRecorderImpl implements FlightRecorder {
   }
 
   public async deleteIncident(incidentId: string): Promise<void> {
-    if (this.incidentManager) await this.incidentManager.deleteIncident(incidentId);
-    else await this.db.deleteIncident(incidentId);
-    await this.retention.prune();
-    await this.updateStatsCache();
+    if (this.incidentManager) {
+      await this.incidentManager.deleteIncident(incidentId);
+      await this.incidentManager.runExclusive(async () => {
+        await this.retention.prune();
+        await this.updateStatsCache();
+      });
+    } else {
+      await this.db.deleteIncident(incidentId);
+      await this.retention.prune();
+      await this.updateStatsCache();
+    }
   }
 
   public async clear(): Promise<void> {
+    if (this.writer) {
+      await this.writer.flush();
+    }
+    if (this.retentionPromise) {
+      try {
+        await this.retentionPromise;
+      } catch {
+        // Ignora
+      }
+    }
+    if (this.incidentManager) {
+      await this.incidentManager.reset();
+    }
+    if (this.stateMachine.getState() === 'incident_pending') {
+      this.stateMachine.transition({ type: 'FINALIZE_INCIDENT' });
+    }
     await this.db.clearAll();
     this.cachedStorageBytes = 0;
     this.cachedProtectedBytes = 0;

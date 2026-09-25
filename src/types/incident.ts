@@ -29,6 +29,7 @@ export interface StoredIncident {
   chunkIds: string[];
   recordingIssues?: string[];
   environment?: EnvironmentMetadata;
+  droppedEvents?: number;
 }
 
 export interface IncidentSummary {

@@ -261,7 +261,13 @@ export class IncidentManager {
     };
   }
 
+  private isDestroyed = false;
+
   private serializeOperation<T>(op: () => Promise<T>): Promise<T> {
+    if (this.isDestroyed) {
+      return Promise.reject(new Error('IncidentManager foi destruído.'));
+    }
+
     let opPromise: Promise<T>;
     const wrappedOp = async () => {
       try {
@@ -292,6 +298,34 @@ export class IncidentManager {
     opPromise = this.activeOperation.then(run, run);
     this.activeOperation = opPromise;
     return opPromise;
+  }
+
+  public runExclusive<T>(op: () => Promise<T>): Promise<T> {
+    return this.serializeOperation(op);
+  }
+
+  /**
+   * Associa todos os chunks persistidos da sessão atual ao incidente pendente (se houver),
+   * garantindo que eles estejam protegidos no IndexedDB antes da execução de qualquer prune.
+   */
+  public async protectSessionChunks(): Promise<void> {
+    if (!this.pendingIncident) return;
+
+    const sessionChunks = await this.db.getChunksBySession(this.sessionId);
+    const existingIds = new Set(this.pendingIncident.chunkIds);
+    let changed = false;
+
+    for (const chunk of sessionChunks) {
+      if (!existingIds.has(chunk.id)) {
+        this.pendingIncident.chunkIds.push(chunk.id);
+        existingIds.add(chunk.id);
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      await this.db.putIncident(this.pendingIncident);
+    }
   }
 
   public setOnError(callback: (error: unknown) => void): void {
@@ -330,7 +364,7 @@ export class IncidentManager {
     } else {
       const remainingMs = existing.finalizeAt - now;
       this.finalizeTimer = setTimeout(() => {
-        this.finalize(existing.id);
+        void this.finalize(existing.id).catch(() => {});
       }, remainingMs);
     }
   }
@@ -366,6 +400,7 @@ export class IncidentManager {
       const incidentId = generateIncidentId('inc', this.sessionId, now);
       const chunks = await this.db.getChunksBySession(this.sessionId);
       const startedAt = chunks.length > 0 ? chunks[0].startedAt : now;
+      const droppedEvents = this.config.getDroppedEventsCount?.() ?? 0;
 
       const newIncident: StoredIncident = {
         id: incidentId,
@@ -379,16 +414,19 @@ export class IncidentManager {
         state: 'pending',
         recordingIssues: this.config.getRecordingIssues?.() ?? [],
         chunkIds: chunks.map((c) => c.id),
-        environment: this.getEnvironment()
+        environment: this.getEnvironment(),
+        droppedEvents
       };
 
       this.pendingIncident = newIncident;
       this.hasExtendedOnce = false;
       await this.db.putIncident(newIncident);
 
-      this.finalizeTimer = setTimeout(() => {
-        this.finalize(incidentId);
-      }, this.config.afterErrorSeconds * 1000);
+      if (!this.isDestroyed) {
+        this.finalizeTimer = setTimeout(() => {
+          void this.finalize(incidentId).catch(() => {});
+        }, this.config.afterErrorSeconds * 1000);
+      }
 
       if (this.onIncidentPendingCallback) {
         this.onIncidentPendingCallback(newIncident);
@@ -415,10 +453,12 @@ export class IncidentManager {
       if (this.finalizeTimer) {
         clearTimeout(this.finalizeTimer);
       }
-      const remainingMs = existing.finalizeAt - now;
-      this.finalizeTimer = setTimeout(() => {
-        this.finalize(existing.id);
-      }, remainingMs);
+      if (!this.isDestroyed) {
+        const remainingMs = existing.finalizeAt - now;
+        this.finalizeTimer = setTimeout(() => {
+          void this.finalize(existing.id).catch(() => {});
+        }, remainingMs);
+      }
     }
 
     // Atualiza chunkIds associados
@@ -535,6 +575,7 @@ export class IncidentManager {
     if (hasUnprovenTemporalChunk) {
       recordingIssues.push('Ausência de prova temporal para snapshot em lote legado com hasFullSnapshot.');
     }
+    const droppedEvents = this.config.getDroppedEventsCount?.() ?? 0;
 
     const incident: StoredIncident = {
       id: incidentId,
@@ -549,7 +590,8 @@ export class IncidentManager {
       state: 'finalized',
       recordingIssues,
       chunkIds: selectedChunks.map((c) => c.id),
-      environment: this.getEnvironment()
+      environment: this.getEnvironment(),
+      droppedEvents
     };
 
     await this.db.putIncident(incident);
@@ -559,6 +601,14 @@ export class IncidentManager {
     }
 
     return incidentId;
+  }
+
+  public async executeManualTrigger(
+    triggerData: IncidentTrigger,
+    windowSeconds?: number
+  ): Promise<string> {
+    const now = triggerData.timestamp || Date.now();
+    return this.createAndFinalizeManualIncident(triggerData, now, windowSeconds);
   }
 
   /**
@@ -586,6 +636,10 @@ export class IncidentManager {
 
     const incident = await this.db.getIncident(incidentId);
     if (!incident || incident.state === 'finalized') {
+      if (this.pendingIncident?.id === incidentId) {
+        this.pendingIncident = null;
+        this.hasExtendedOnce = false;
+      }
       return;
     }
 
@@ -601,6 +655,12 @@ export class IncidentManager {
     incident.state = 'finalized';
     incident.finalizedAt = finalizedAt;
     incident.chunkIds = allChunkIds;
+    const currentDropped = this.config.getDroppedEventsCount?.();
+    if (typeof currentDropped === 'number') {
+      incident.droppedEvents = currentDropped;
+    } else if (incident.droppedEvents === undefined) {
+      incident.droppedEvents = 0;
+    }
 
     await this.db.putIncident(incident);
 
@@ -679,7 +739,7 @@ export class IncidentManager {
     }
 
     const totalStorageBytes = chunks.reduce((acc, c) => acc + (c.sizeBytes || 0), 0);
-    const knownDroppedEvents = this.config.getDroppedEventsCount?.() ?? 0;
+    const knownDroppedEvents = incident.droppedEvents ?? this.config.getDroppedEventsCount?.() ?? 0;
     const hasUnquantifiableLoss = hasMissingChunks || hasCorruptedChunks;
 
     const artifact: FlightRecorderArtifactV1 = {
@@ -736,11 +796,38 @@ export class IncidentManager {
     await this.db.deleteIncident(incidentId);
   }
 
-  public destroy(): void {
+  /**
+   * Reseta o estado em memória do gerenciador de incidentes:
+   * cancela timer de finalização e descarta incidente pendente.
+   * Serializado para aguardar operações em andamento.
+   */
+  public reset(): Promise<void> {
+    return this.serializeOperation(async () => {
+      if (this.finalizeTimer) {
+        clearTimeout(this.finalizeTimer);
+        this.finalizeTimer = null;
+      }
+      this.pendingIncident = null;
+      this.hasExtendedOnce = false;
+    });
+  }
+
+  public async destroy(): Promise<void> {
+    this.isDestroyed = true;
+
+    if (this.activeOperation) {
+      try {
+        await this.activeOperation;
+      } catch {
+        // Ignora erro de operação em andamento
+      }
+    }
+
     if (this.finalizeTimer) {
       clearTimeout(this.finalizeTimer);
       this.finalizeTimer = null;
     }
     this.pendingIncident = null;
+    this.hasExtendedOnce = false;
   }
 }
