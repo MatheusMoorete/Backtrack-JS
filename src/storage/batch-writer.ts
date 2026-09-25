@@ -3,11 +3,27 @@ import type { StoredChunk, RrwebEvent } from '../types/chunk';
 import type { TimelineEvent } from '../types/timeline';
 import { compressGzip } from '../utils/compression';
 
+export interface FlushMetrics {
+  flushIndex: number;
+  durationMs: number;
+  serializationMs: number;
+  compressionMs: number;
+  writeMs: number;
+  chunkSizeBytes: number;
+  replayEventsInBatch: number;
+  timelineEventsInBatch: number;
+  totalReplayInChunk: number;
+  totalTimelineInChunk: number;
+  totalEventsInChunk: number;
+  timestamp: number;
+}
+
 export interface BatchWriterConfig {
   flushIntervalMs: number; // default 1000ms
   maxBatchEvents: number;  // default 250
   chunkDurationMs: number; // default 60000ms (60s)
   initialChunkSequence?: number;
+  onFlushMetrics?: (metrics: FlushMetrics) => void;
 }
 
 export class BatchWriter {
@@ -16,7 +32,6 @@ export class BatchWriter {
   private sessionId: string;
   private tabId: string;
 
-  private currentChunk: StoredChunk | null = null;
   private chunkSequence = 0;
   private pendingTimelineEvents: TimelineEvent[] = [];
   private pendingReplayEvents: RrwebEvent[] = [];
@@ -28,6 +43,8 @@ export class BatchWriter {
   private onChunkPersistedCallback?: (chunk: StoredChunk) => void;
   private pageHideHandler?: () => void;
   private visibilityChangeHandler?: () => void;
+  private flushCount = 0;
+  private onFlushMetricsCallback?: (metrics: FlushMetrics) => void;
 
   constructor(
     db: FlightRecorderDB,
@@ -43,16 +60,22 @@ export class BatchWriter {
       flushIntervalMs: config?.flushIntervalMs ?? 1000,
       maxBatchEvents: config?.maxBatchEvents ?? 250,
       chunkDurationMs: config?.chunkDurationMs ?? 60000,
-      initialChunkSequence: config?.initialChunkSequence ?? 0
+      initialChunkSequence: config?.initialChunkSequence ?? 0,
+      onFlushMetrics: config?.onFlushMetrics
     };
     this.chunkSequence = config?.initialChunkSequence ?? 0;
     this.onErrorCallback = onError;
+    this.onFlushMetricsCallback = config?.onFlushMetrics;
 
     this.initLifecycleListeners();
   }
 
   public getChunkSequence(): number {
     return this.chunkSequence;
+  }
+
+  public setOnFlushMetrics(callback: (metrics: FlushMetrics) => void): void {
+    this.onFlushMetricsCallback = callback;
   }
 
   public setOnChunkPersisted(callback: (chunk: StoredChunk) => void): void {
@@ -104,62 +127,59 @@ export class BatchWriter {
     this.pendingReplayEvents = [];
 
     const now = Date.now();
-
-    // Se não há chunk atual ou se o chunk excedeu a duração padrão, abre um novo
-    if (!this.currentChunk || now - this.currentChunk.startedAt >= this.config.chunkDurationMs) {
-      const allEventsTs = [
-        ...timelineToFlush.map((e) => e.timestamp),
-        ...replayToFlush.map((e) => e.timestamp)
-      ];
-      const chunkStartedAt = allEventsTs.length > 0 ? Math.min(...allEventsTs) : now;
-
-      this.chunkSequence++;
-      this.currentChunk = {
-        id: `chk_${this.sessionId}_${this.chunkSequence}_${chunkStartedAt}`,
-        sessionId: this.sessionId,
-        tabId: this.tabId,
-        sequence: this.chunkSequence,
-        startedAt: chunkStartedAt,
-        endedAt: now,
-        sizeBytes: 0,
-        replay: [],
-        timeline: []
-      };
-    }
-
-    this.currentChunk.timeline.push(...timelineToFlush);
-    this.currentChunk.replay.push(...replayToFlush);
-    const allFlushTs = [
+    const allEventsTs = [
       ...timelineToFlush.map((e) => e.timestamp),
-      ...replayToFlush.map((e) => e.timestamp),
-      now
+      ...replayToFlush.map((e) => e.timestamp)
     ];
-    this.currentChunk.endedAt = Math.max(this.currentChunk.endedAt, ...allFlushTs);
+    const startedAt = allEventsTs.length > 0 ? Math.min(...allEventsTs) : now;
+    const endedAt = allEventsTs.length > 0 ? Math.max(...allEventsTs) : now;
 
-    // Estimativa grosseira de bytes do chunk
-    const serialized = JSON.stringify(this.currentChunk);
-    this.currentChunk.sizeBytes = serialized.length;
+    this.chunkSequence++;
 
-    const snapshotTimestamps = this.currentChunk.replay
+    const snapshotTimestamps = replayToFlush
       .filter((r) => r.type === 2)
       .map((r) => r.timestamp);
 
     const chunkCopy: StoredChunk = {
-      ...this.currentChunk,
+      id: `chk_${this.sessionId}_${this.chunkSequence}_${startedAt}`,
+      sessionId: this.sessionId,
+      tabId: this.tabId,
+      sequence: this.chunkSequence,
+      startedAt,
+      endedAt,
+      sizeBytes: 0,
       hasFullSnapshot: snapshotTimestamps.length > 0,
       snapshotTimestamps,
-      timeline: [...this.currentChunk.timeline],
-      replay: [...this.currentChunk.replay]
+      timeline: timelineToFlush,
+      replay: replayToFlush
     };
+
+    const flushIndex = ++this.flushCount;
+    const replayEventsInBatch = replayToFlush.length;
+    const timelineEventsInBatch = timelineToFlush.length;
+    const totalReplayInChunk = replayEventsInBatch;
+    const totalTimelineInChunk = timelineEventsInBatch;
+    const totalEventsInChunk = totalReplayInChunk + totalTimelineInChunk;
 
     this.pendingWritesCount++;
 
     this.writeChain = this.writeChain
       .then(async () => {
+        const tStart = performance.now();
+        let serializationMs = 0;
+        let compressionMs = 0;
+
         if (chunkCopy.replay.length > 0) {
           try {
+            const t0 = performance.now();
             const json = JSON.stringify(chunkCopy.replay);
+            const t1 = performance.now();
+            serializationMs = t1 - t0;
+
             const compressed = await compressGzip(json);
+            const t2 = performance.now();
+            compressionMs = t2 - t1;
+
             chunkCopy.replayCompressed = compressed;
             chunkCopy.sizeBytes = compressed.byteLength + JSON.stringify(chunkCopy.timeline).length;
             chunkCopy.replay = [];
@@ -167,7 +187,32 @@ export class BatchWriter {
             // Em caso de falha, mantém replay original
           }
         }
+        if (chunkCopy.sizeBytes === 0) {
+          chunkCopy.sizeBytes = JSON.stringify(chunkCopy.timeline).length;
+        }
+        const tWriteStart = performance.now();
         await this.db.putChunk(chunkCopy);
+        const tWriteEnd = performance.now();
+        const writeMs = tWriteEnd - tWriteStart;
+        const durationMs = tWriteEnd - tStart;
+
+        if (this.onFlushMetricsCallback) {
+          this.onFlushMetricsCallback({
+            flushIndex,
+            durationMs,
+            serializationMs,
+            compressionMs,
+            writeMs,
+            chunkSizeBytes: chunkCopy.sizeBytes,
+            replayEventsInBatch,
+            timelineEventsInBatch,
+            totalReplayInChunk,
+            totalTimelineInChunk,
+            totalEventsInChunk,
+            timestamp: Date.now()
+          });
+        }
+
         if (this.onChunkPersistedCallback) {
           this.onChunkPersistedCallback(chunkCopy);
         }

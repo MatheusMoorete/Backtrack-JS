@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Backtrack Recompression Benchmark — 5 Minutos</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      margin: 16px;
+      color: #111827;
+      background: #f3f4f6;
+    }
+    .header-bar {
+      background: #ffffff;
+      padding: 16px;
+      border-radius: 8px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      margin-bottom: 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .metrics-panel {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .metric-card {
+      background: #ffffff;
+      padding: 12px 16px;
+      border-radius: 8px;
+      border: 1px solid #e5e7eb;
+    }
+    .metric-label {
+      font-size: 11px;
+      color: #6b7280;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+    .metric-val {
+      font-size: 20px;
+      font-weight: 700;
+      color: #1f2937;
+      margin-top: 4px;
+    }
+    .dom-container {
+      background: #ffffff;
+      padding: 16px;
+      border-radius: 8px;
+      border: 1px solid #e5e7eb;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    th, td {
+      border: 1px solid #e5e7eb;
+      padding: 6px 10px;
+      text-align: left;
+    }
+    th {
+      background: #f9fafb;
+    }
+    .highlight-cell {
+      background: #fef3c7;
+      font-weight: 600;
+    }
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .data-card {
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      padding: 8px;
+      background: #fafafa;
+    }
+  </style>
+</head>
+<body>
+  <div class="header-bar">
+    <div>
+      <h1 style="font-size: 18px; margin: 0;">Fidelity Benchmark: Medição de Recompressão</h1>
+      <p style="margin: 4px 0 0; color: #6b7280; font-size: 13px;">
+        Página com DOM grande, mutações frequentes, console e requisições de rede contínuas.
+      </p>
+    </div>
+    <div id="status-badge" style="padding: 6px 12px; border-radius: 4px; font-weight: 600; background: #e5e7eb; font-size: 13px;">
+      Aguardando início
+    </div>
+  </div>
+
+  <div class="metrics-panel">
+    <div class="metric-card">
+      <div class="metric-label">Tempo Decorrido</div>
+      <div class="metric-val" id="val-elapsed">0s</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Flushes Realizados</div>
+      <div class="metric-val" id="val-flushes">0</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Duração Média Flush</div>
+      <div class="metric-val" id="val-avg-flush">0 ms</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Duração Máxima Flush</div>
+      <div class="metric-val" id="val-max-flush">0 ms</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Long Tasks (>50ms)</div>
+      <div class="metric-val" id="val-long-tasks">0</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Tamanho Máx. Chunk</div>
+      <div class="metric-val" id="val-max-size">0 KB</div>
+    </div>
+  </div>
+
+  <div class="dom-container">
+    <h3>Estrutura DOM Grande (Tabela Dinâmica + Cards)</h3>
+    <table id="benchmark-table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Nome</th>
+          <th>Status</th>
+          <th>Transação</th>
+          <th>Valor</th>
+          <th>Origem</th>
+          <th>Tag</th>
+          <th>Atualizado Em</th>
+        </tr>
+      </thead>
+      <tbody id="table-body"></tbody>
+    </table>
+
+    <div class="card-grid" id="card-grid"></div>
+  </div>
+
+  <script type="module" src="./benchmark.ts"></script>
+</body>
+</html>

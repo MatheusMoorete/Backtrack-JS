@@ -179,7 +179,8 @@ describe('Lote 2 — Capturadores Individuais', () => {
     await writer.flush();
 
     const chunks = await db.getChunksBySession('sess_cap');
-    const navEvt = chunks[0]?.timeline.find(
+    const allTimeline = chunks.flatMap((c) => c.timeline);
+    const navEvt = allTimeline.find(
       (e) => e.type === 'navigation' && (e as { kind: string }).kind === 'pushState'
     );
 
