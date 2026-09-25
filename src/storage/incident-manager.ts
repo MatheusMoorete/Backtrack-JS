@@ -204,6 +204,8 @@ export class IncidentManager {
   private beforeFinalizeCallback?: () => Promise<void>;
   private onErrorCallback?: (error: unknown) => void;
   private activeOperation: Promise<unknown> | null = null;
+  private recoveredBaseIncidentId?: string;
+  private baseRecoveredDroppedEvents = 0;
 
   constructor(
     db: FlightRecorderDB,
@@ -357,6 +359,8 @@ export class IncidentManager {
     if (!existing) return;
 
     this.pendingIncident = existing;
+    this.recoveredBaseIncidentId = existing.id;
+    this.baseRecoveredDroppedEvents = existing.droppedEvents ?? 0;
     const now = Date.now();
 
     if (now >= existing.finalizeAt) {
@@ -397,6 +401,8 @@ export class IncidentManager {
 
     // Captura automática
     if (!this.pendingIncident) {
+      this.recoveredBaseIncidentId = undefined;
+      this.baseRecoveredDroppedEvents = 0;
       const incidentId = generateIncidentId('inc', this.sessionId, now);
       const chunks = await this.db.getChunksBySession(this.sessionId);
       const startedAt = chunks.length > 0 ? chunks[0].startedAt : now;
@@ -461,9 +467,14 @@ export class IncidentManager {
       }
     }
 
-    // Atualiza chunkIds associados
+    // Atualiza chunkIds associados e perdas conhecidas
     const sessionChunks = await this.db.getChunksBySession(this.sessionId);
     existing.chunkIds = Array.from(new Set([...existing.chunkIds, ...sessionChunks.map((c) => c.id)]));
+    const currentDropped = this.config.getDroppedEventsCount?.() ?? 0;
+    existing.droppedEvents =
+      this.recoveredBaseIncidentId === existing.id
+        ? this.baseRecoveredDroppedEvents + currentDropped
+        : (typeof this.config.getDroppedEventsCount === 'function' ? currentDropped : existing.droppedEvents);
 
     await this.db.putIncident(existing);
     return existing.id;
@@ -655,8 +666,12 @@ export class IncidentManager {
     incident.state = 'finalized';
     incident.finalizedAt = finalizedAt;
     incident.chunkIds = allChunkIds;
-    const currentDropped = this.config.getDroppedEventsCount?.();
-    if (typeof currentDropped === 'number') {
+    const currentDropped = this.config.getDroppedEventsCount?.() ?? 0;
+    if (this.recoveredBaseIncidentId === incidentId) {
+      // Incidente recuperado do banco pós-reload: preserva contagem persistida e soma perdas pós-reload
+      incident.droppedEvents = this.baseRecoveredDroppedEvents + currentDropped;
+    } else if (typeof this.config.getDroppedEventsCount === 'function') {
+      // Incidente criado no runtime atual: usa contagem atual
       incident.droppedEvents = currentDropped;
     } else if (incident.droppedEvents === undefined) {
       incident.droppedEvents = 0;
@@ -666,6 +681,8 @@ export class IncidentManager {
 
     if (this.pendingIncident?.id === incidentId) {
       this.pendingIncident = null;
+      this.recoveredBaseIncidentId = undefined;
+      this.baseRecoveredDroppedEvents = 0;
       this.hasExtendedOnce = false;
     }
 
@@ -792,6 +809,8 @@ export class IncidentManager {
         this.finalizeTimer = null;
       }
       this.pendingIncident = null;
+      this.recoveredBaseIncidentId = undefined;
+      this.baseRecoveredDroppedEvents = 0;
     }
     await this.db.deleteIncident(incidentId);
   }
@@ -808,6 +827,8 @@ export class IncidentManager {
         this.finalizeTimer = null;
       }
       this.pendingIncident = null;
+      this.recoveredBaseIncidentId = undefined;
+      this.baseRecoveredDroppedEvents = 0;
       this.hasExtendedOnce = false;
     });
   }
@@ -828,6 +849,8 @@ export class IncidentManager {
       this.finalizeTimer = null;
     }
     this.pendingIncident = null;
+    this.recoveredBaseIncidentId = undefined;
+    this.baseRecoveredDroppedEvents = 0;
     this.hasExtendedOnce = false;
   }
 }

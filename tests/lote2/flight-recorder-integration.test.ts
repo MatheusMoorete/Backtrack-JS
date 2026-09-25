@@ -257,6 +257,70 @@ describe('Lote 2 — Sincronização de incident_pending com IncidentManager', (
     customDb.close();
   });
 
+  it('incidente automático pendente com droppedEvents > 0 preserva contagem após reload, finalização e exportação', async () => {
+    const fixedNow = 1700000000000;
+    const storage = createMockStorage();
+    const customDb = new FlightRecorderDB(new IDBFactory());
+
+    // 1. Instância inicial com capturador registrando 42 eventos perdidos
+    const rec1 = new FlightRecorderImpl(
+      {
+        storage,
+        sessionOptions: { disableBroadcastChannel: true },
+        afterErrorSeconds: 10
+      },
+      customDb
+    );
+    await rec1.start();
+    (rec1 as any).rrwebCapturer = {
+      getDroppedEventsCount: () => 42,
+      stop: () => {}
+    };
+
+    // Dispara erro automático com droppedEvents = 42
+    await rec1.captureException(new Error('Erro com perdas antes do reload'));
+    expect(rec1.getHealth().state).toBe('incident_pending');
+
+    const incidentsRec1 = await rec1.listIncidents();
+    expect(incidentsRec1.length).toBe(1);
+    const incidentId = incidentsRec1[0].id;
+
+    // 2. Simula reload após 4s (restam 6s para finalizeAt)
+    vi.setSystemTime(fixedNow + 4000);
+    await rec1.stop();
+    resetSessionContext();
+
+    // 3. Nova instância na mesma aba após reload (novo capturador começa com 0 e registra mais 3 perdas)
+    const rec2 = new FlightRecorderImpl(
+      {
+        storage,
+        sessionOptions: { disableBroadcastChannel: true },
+        afterErrorSeconds: 10
+      },
+      customDb
+    );
+    await rec2.start();
+    (rec2 as any).rrwebCapturer = {
+      getDroppedEventsCount: () => 3,
+      stop: () => {}
+    };
+
+    expect(rec2.getHealth().state).toBe('incident_pending');
+
+    // 4. Avança os 6s restantes para disparar a finalização
+    vi.setSystemTime(fixedNow + 10000);
+    await vi.advanceTimersByTimeAsync(6000);
+
+    await vi.waitFor(() => expect(rec2.getHealth().state).toBe('recording'));
+
+    // 5. Exporta o artefato e verifica que a contagem preserva 42 + 3 = 45
+    const artifact = await rec2.getArtifact(incidentId);
+    expect(artifact.diagnostics.droppedEvents).toBe(45);
+
+    await rec2.stop();
+    customDb.close();
+  });
+
   it('reload depois do prazo finaliza o incidente e inicia em recording', async () => {
     const fixedNow = 1700000000000;
     const storage = createMockStorage();
