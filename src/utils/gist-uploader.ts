@@ -22,12 +22,18 @@ export async function uploadArtifactToGist(
   const filename = `backtrack-${artifact.incident.id}.ffr.json`;
   const description = `Backtrack Incident Replay [${artifact.incident.id}]: ${artifact.incident.reason}`;
 
+  const content = JSON.stringify(artifact, null, 2);
+  const sizeBytes = new TextEncoder().encode(content).length;
+  if (sizeBytes > 10 * 1024 * 1024) {
+    throw new Error('O artefato excede o limite máximo de 10 MB suportado para upload.');
+  }
+
   const payload = {
     description,
     public: false,
     files: {
       [filename]: {
-        content: JSON.stringify(artifact, null, 2)
+        content
       }
     }
   };

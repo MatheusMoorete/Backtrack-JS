@@ -687,7 +687,7 @@ export const IncidentHeader: React.FC<IncidentHeaderProps> = ({ artifact, onRese
                         JSON para IA (.ai.json)
                       </span>
                       <p style={{ margin: '2px 0 0 0', fontSize: '11px', color: '#94a3b8', lineHeight: 1.35 }}>
-                        Leve (&lt; 100 KB), sem replay visual. Ideal para Gemini e Claude.
+                        Sem replay visual, otimizado para uso com IA. Ideal para Gemini e Claude.
                       </p>
                     </div>
                   </label>

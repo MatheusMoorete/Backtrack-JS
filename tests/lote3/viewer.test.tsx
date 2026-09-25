@@ -24,6 +24,8 @@ describe('Lote 3 — Viewer do Flight Recorder', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    delete (window as any).opener;
+    history.replaceState(null, '', '/');
   });
 
   it('FileImporter rejeita arquivo que excede o limite máximo antes de fazer parse', async () => {
@@ -232,7 +234,30 @@ describe('Lote 3 — Viewer do Flight Recorder', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it('carrega artefato automaticamente ao receber mensagem postMessage LOAD_FFR_ARTIFACT', async () => {
+  it('ignora mensagens postMessage quando não existir opener ou origem confiável', async () => {
+    (window as any).opener = null;
+    history.replaceState(null, '', '/');
+    render(<App />);
+
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: {
+          type: 'LOAD_FFR_ARTIFACT',
+          artifact: validArtifact
+        },
+        origin: 'http://malicious.site'
+      })
+    );
+
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByText(validArtifact.incident.id)).toBeNull();
+  });
+
+  it('carrega artefato automaticamente ao receber mensagem postMessage LOAD_FFR_ARTIFACT de opener confiável', async () => {
+    const opener = { postMessage: vi.fn() };
+    (window as any).opener = opener;
+    history.replaceState(null, '', '?openerOrigin=http://localhost:3000');
+
     render(<App />);
 
     // Simula evento postMessage vindo de uma janela do uTicket
@@ -242,7 +267,8 @@ describe('Lote 3 — Viewer do Flight Recorder', () => {
           type: 'LOAD_FFR_ARTIFACT',
           artifact: validArtifact
         },
-        origin: 'http://localhost:3000'
+        origin: 'http://localhost:3000',
+        source: opener as unknown as MessageEventSource
       })
     );
 
@@ -252,6 +278,10 @@ describe('Lote 3 — Viewer do Flight Recorder', () => {
   });
 
   it('ReplayPlayer exibe botões de salto segundo a segundo e controle de zoom', async () => {
+    const opener = { postMessage: vi.fn() };
+    (window as any).opener = opener;
+    history.replaceState(null, '', '?openerOrigin=http://localhost:3000');
+
     render(<App />);
 
     window.dispatchEvent(
@@ -260,7 +290,8 @@ describe('Lote 3 — Viewer do Flight Recorder', () => {
           type: 'LOAD_FFR_ARTIFACT',
           artifact: validArtifact
         },
-        origin: 'http://localhost:3000'
+        origin: 'http://localhost:3000',
+        source: opener as unknown as MessageEventSource
       })
     );
 
@@ -305,6 +336,10 @@ describe('Lote 3 — Viewer do Flight Recorder', () => {
   });
 
   it('abas responsivas alternam o painel selecionado sem descarregar o incidente nem perder a timeline', async () => {
+    const opener = { postMessage: vi.fn() };
+    (window as any).opener = opener;
+    history.replaceState(null, '', '?openerOrigin=http://localhost:3000');
+
     render(<App />);
 
     window.dispatchEvent(
@@ -313,7 +348,8 @@ describe('Lote 3 — Viewer do Flight Recorder', () => {
           type: 'LOAD_FFR_ARTIFACT',
           artifact: validArtifact
         },
-        origin: 'http://localhost:3000'
+        origin: 'http://localhost:3000',
+        source: opener as unknown as MessageEventSource
       })
     );
 

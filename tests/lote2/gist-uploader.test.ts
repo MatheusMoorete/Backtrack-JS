@@ -109,4 +109,22 @@ describe('GitHub Gist Uploader', () => {
       /limite suportado pelo GitHub Gist/
     );
   });
+
+  it('rejeita artefato local com tamanho superior a 10 MB antes de chamar a API', async () => {
+    const hugeArtifact: FlightRecorderArtifactV1 = {
+      ...mockArtifact,
+      environment: {
+        ...mockArtifact.environment,
+        userAgent: 'x'.repeat(11 * 1024 * 1024)
+      }
+    };
+
+    const fetchSpy = vi.fn();
+    globalThis.fetch = fetchSpy;
+
+    await expect(uploadArtifactToGist(hugeArtifact, 'valid_token')).rejects.toThrow(
+      'O artefato excede o limite máximo de 10 MB suportado para upload.'
+    );
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
 });

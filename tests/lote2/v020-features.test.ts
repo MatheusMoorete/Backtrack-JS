@@ -227,6 +227,100 @@ describe('Backtrack v0.2.0 — Novas Features', () => {
       expect(scriptNode.childNodes).toEqual([]);
     });
 
+    it('sanitizeReplayEvents sanitiza eventos incrementais e injeta CSP no head do snapshot', () => {
+      // 1. Snapshot com nó head
+      const snapshotWithHead = [
+        {
+          type: 2,
+          timestamp: 1000,
+          data: {
+            node: {
+              type: 2,
+              tagName: 'html',
+              attributes: {},
+              childNodes: [
+                {
+                  type: 2,
+                  tagName: 'head',
+                  attributes: {},
+                  childNodes: [
+                    {
+                      type: 2,
+                      tagName: 'title',
+                      attributes: {},
+                      childNodes: [{ type: 3, textContent: 'Page Title' }]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ];
+
+      const sanitizedSnapshot = sanitizeReplayEvents(snapshotWithHead) as any[];
+      const headNode = sanitizedSnapshot[0].data.node.childNodes[0];
+      expect(headNode.tagName).toBe('head');
+      const firstChild = headNode.childNodes[0];
+      expect(firstChild.tagName).toBe('meta');
+      expect(firstChild.attributes['http-equiv']).toBe('Content-Security-Policy');
+      expect(firstChild.attributes.content).toContain("default-src 'none'");
+
+      // 2. Eventos incrementais (tipo 3): mutações de atributos, regras CSS e estilos
+      const incrementalEvents = [
+        {
+          type: 3,
+          timestamp: 2000,
+          data: {
+            attributes: [
+              {
+                id: 10,
+                attributes: {
+                  onclick: 'alert(1)',
+                  src: 'https://malicious.site/tracker.png',
+                  style: 'background-image: url("https://malicious.site/bg.png")'
+                }
+              }
+            ],
+            rules: [
+              {
+                rule: '@import url("https://malicious.site/fonts.css"); body { background: url("https://malicious.site/body.jpg"); }'
+              }
+            ],
+            styles: [
+              {
+                styleText: 'div { background-image: url("https://tracker.com/pixel"); }'
+              }
+            ],
+            set: [
+              {
+                property: 'background-image',
+                value: 'url("https://tracker.com/style.png")'
+              }
+            ]
+          }
+        }
+      ];
+
+      const sanitizedIncremental = sanitizeReplayEvents(incrementalEvents) as any[];
+      const incData = sanitizedIncremental[0].data;
+
+      // Atributos mutados
+      expect(incData.attributes[0].attributes.onclick).toBeUndefined();
+      expect(incData.attributes[0].attributes.src).toContain('data:image/svg+xml');
+      expect(incData.attributes[0].attributes.style).not.toContain('https://');
+
+      // Regras CSS mutadas
+      expect(incData.rules[0].rule).not.toContain('https://');
+      expect(incData.rules[0].rule).toContain('blocked-import');
+
+      // Estilos adotados mutados
+      expect(incData.styles[0].styleText).not.toContain('https://');
+
+      // Declarações de estilo mutadas
+      expect(incData.set[0].value).not.toContain('https://');
+    });
+
     it('exporta incidente otimizado para IA (.ai.json) mantendo timeline e ambiente', async () => {
       const recorder = new FlightRecorderImpl({}, db);
       await recorder.start();

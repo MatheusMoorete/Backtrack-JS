@@ -74,15 +74,15 @@ export const App: React.FC = () => {
 
     // 3. Listener para carregar incidentes automaticamente via postMessage
     const handleMessage = async (event: MessageEvent) => {
-      if (window.opener && openerOrigin && (event.source !== window.opener || event.origin !== openerOrigin)) return;
+      if (!window.opener || !openerOrigin || event.source !== window.opener || event.origin !== openerOrigin) return;
       if (event.data?.type !== 'LOAD_BACKTRACK_ARTIFACT' && event.data?.type !== 'LOAD_FFR_ARTIFACT') return;
       try {
         const loaded = await decompressArtifact(event.data.artifact);
         if (disposed) return;
         if (event.source && 'postMessage' in event.source) {
           try {
-            (event.source as Window).postMessage({ type: 'BACKTRACK_ARTIFACT_RECEIVED' }, openerOrigin || '*');
-            (event.source as Window).postMessage({ type: 'FFR_ARTIFACT_RECEIVED' }, openerOrigin || '*');
+            (event.source as Window).postMessage({ type: 'BACKTRACK_ARTIFACT_RECEIVED' }, openerOrigin);
+            (event.source as Window).postMessage({ type: 'FFR_ARTIFACT_RECEIVED' }, openerOrigin);
           } catch {
             // Ignora
           }

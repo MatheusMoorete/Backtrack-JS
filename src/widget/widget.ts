@@ -519,21 +519,17 @@ export class BacktrackWidget {
   }
 
   private async handleShareGist(incidentId: string): Promise<void> {
-    let token = typeof localStorage !== 'undefined' ? localStorage.getItem('backtrack_github_token') : null;
+    let token = BacktrackWidget.sessionGithubToken;
 
     if (!token || !token.trim()) {
       const prompted = prompt(
-        'Insira seu GitHub Personal Access Token (com permissão "gist") para gerar o link compartilhado:'
+        'Insira seu GitHub Personal Access Token (com permissão "gist") para gerar o link não listado:\n(O token será mantido apenas em memória nesta sessão)'
       );
       if (!prompted || !prompted.trim()) {
         return;
       }
       token = prompted.trim();
-      try {
-        localStorage.setItem('backtrack_github_token', token);
-      } catch {
-        // Ignora
-      }
+      BacktrackWidget.sessionGithubToken = token;
     }
 
     try {
@@ -575,11 +571,7 @@ export class BacktrackWidget {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes('401')) {
-        try {
-          localStorage.removeItem('backtrack_github_token');
-        } catch {
-          // Ignora
-        }
+        BacktrackWidget.sessionGithubToken = null;
       }
       this.showBanner('Não foi possível gerar o link. Tente novamente.', 'danger');
     }
@@ -640,8 +632,20 @@ export class BacktrackWidget {
   }
 
   private openInViewer(artifact: FlightRecorderArtifactV1): void {
-    const viewerUrl = this.getViewerUrl();
-    const win = window.open(viewerUrl, 'backtrack_viewer');
+    const rawViewerUrl = this.getViewerUrl();
+    let viewerOrigin = '*';
+    let targetUrl = rawViewerUrl;
+
+    try {
+      const parsed = new URL(rawViewerUrl, window.location.href);
+      viewerOrigin = parsed.origin;
+      parsed.searchParams.set('openerOrigin', window.location.origin);
+      targetUrl = parsed.toString();
+    } catch {
+      // Fallback para URL bruta
+    }
+
+    const win = window.open(targetUrl, 'backtrack_viewer');
     if (!win) {
       this.showBanner('Pop-up bloqueado. Permita pop-ups no navegador.', 'danger');
       return;
@@ -670,13 +674,17 @@ export class BacktrackWidget {
         return;
       }
       try {
-        win.postMessage({ type: 'LOAD_BACKTRACK_ARTIFACT', artifact }, '*');
+        win.postMessage({ type: 'LOAD_BACKTRACK_ARTIFACT', artifact }, viewerOrigin);
       } catch {
         // Ignora
       }
     };
 
     const onMessage = (event: MessageEvent) => {
+      // Aceita respostas apenas se vierem da janela aberta e com a origem esperada
+      if (event.source !== win) return;
+      if (viewerOrigin !== '*' && event.origin !== viewerOrigin) return;
+
       if (event.data?.type === 'BACKTRACK_VIEWER_READY' || event.data?.type === 'FFR_VIEWER_READY') {
         sendPayload();
       } else if (event.data?.type === 'BACKTRACK_ARTIFACT_RECEIVED' || event.data?.type === 'FFR_ARTIFACT_RECEIVED') {
@@ -1302,7 +1310,7 @@ export class BacktrackWidget {
               <input type="radio" name="backtrack-download-format" value="ai" id="radio-format-ai" ${this.downloadModalFormat === 'ai' ? 'checked' : ''} ${this.isDownloading ? 'disabled' : ''} />
               <div>
                 <span class="backtrack-modal-radio-title">JSON para IA (.ai.json)</span>
-                <p class="backtrack-modal-radio-desc">Leve (&lt; 100 KB), sem replay visual. Ideal para Gemini e Claude.</p>
+                <p class="backtrack-modal-radio-desc">Sem replay visual, otimizado para uso com IA. Ideal para Gemini e Claude.</p>
               </div>
             </label>
             <label class="backtrack-modal-radio-label ${this.downloadModalFormat === 'gzip' ? 'is-selected' : ''}">

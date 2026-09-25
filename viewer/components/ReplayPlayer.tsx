@@ -6,6 +6,7 @@ import type { TimelineEvent } from '../../src/types/timeline';
 import { isValidAnnotationImage } from '../../src/validation/validate';
 
 function isExternalUrl(url: string): boolean {
+  if (typeof url !== 'string') return false;
   const trimmed = url.trim().toLowerCase();
   return (
     trimmed.startsWith('http:') ||
@@ -17,7 +18,44 @@ function isExternalUrl(url: string): boolean {
 }
 
 function sanitizeCssUrls(css: string): string {
-  return css.replace(/url\(\s*['"]?\s*(?:https?:|\/\/)[^'")]+['"]?\s*\)/gi, 'none');
+  if (typeof css !== 'string') return css;
+  let result = css.replace(/@import\s+(?:url\()?['"]?(?:https?:|\/\/)[^'")]+['"]?\)?/gi, '/* blocked-import */');
+  result = result.replace(/url\(\s*['"]?\s*(?:https?:|\/\/|javascript:)[^'")]+['"]?\s*\)/gi, 'none');
+  return result;
+}
+
+function sanitizeAttributesMap(attrs: Record<string, unknown>): void {
+  for (const key of Object.keys(attrs)) {
+    const lowerKey = key.toLowerCase();
+    if (lowerKey.startsWith('on')) {
+      delete attrs[key];
+      continue;
+    }
+
+    const val = attrs[key];
+    if (typeof val === 'string') {
+      if (lowerKey === 'src') {
+        if (isExternalUrl(val)) {
+          attrs[key] =
+            'data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%221%22%20height%3D%221%22%2F%3E';
+        }
+      } else if (lowerKey === 'poster') {
+        if (isExternalUrl(val)) {
+          attrs[key] = '';
+        }
+      } else if (lowerKey === 'srcset') {
+        if (val.includes('http:') || val.includes('https:') || val.includes('//')) {
+          attrs[key] = '';
+        }
+      } else if (lowerKey === 'href') {
+        if (isExternalUrl(val)) {
+          attrs[key] = '#';
+        }
+      } else if (lowerKey === 'style' || lowerKey === '_csstext') {
+        attrs[key] = sanitizeCssUrls(val);
+      }
+    }
+  }
 }
 
 function sanitizeNode(node: Record<string, unknown>): void {
@@ -28,31 +66,21 @@ function sanitizeNode(node: Record<string, unknown>): void {
       if (node.attributes && typeof node.attributes === 'object') {
         (node.attributes as Record<string, unknown>).src = '';
       }
+      return;
     }
   }
 
   if (node.attributes && typeof node.attributes === 'object') {
-    const attrs = node.attributes as Record<string, unknown>;
-    for (const key of Object.keys(attrs)) {
-      if (key.toLowerCase().startsWith('on')) {
-        delete attrs[key];
-      }
-    }
+    sanitizeAttributesMap(node.attributes as Record<string, unknown>);
+  }
 
-    if (typeof attrs.src === 'string' && isExternalUrl(attrs.src)) {
-      attrs.src = 'data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%221%22%20height%3D%221%22%2F%3E';
-    }
-    if (typeof attrs.srcset === 'string' && isExternalUrl(attrs.srcset)) {
-      attrs.srcset = '';
-    }
-    if (typeof attrs.poster === 'string' && isExternalUrl(attrs.poster)) {
-      attrs.poster = '';
-    }
-    if (typeof attrs.href === 'string' && isExternalUrl(attrs.href)) {
-      attrs.href = '#';
-    }
-    if (typeof attrs.style === 'string') {
-      attrs.style = sanitizeCssUrls(attrs.style);
+  if (typeof node.tagName === 'string' && node.tagName.toLowerCase() === 'style' && Array.isArray(node.childNodes)) {
+    for (const child of node.childNodes) {
+      if (child && typeof child === 'object' && typeof (child as Record<string, unknown>).textContent === 'string') {
+        (child as Record<string, unknown>).textContent = sanitizeCssUrls(
+          (child as Record<string, unknown>).textContent as string
+        );
+      }
     }
   }
 
@@ -60,6 +88,33 @@ function sanitizeNode(node: Record<string, unknown>): void {
     for (const child of node.childNodes) {
       if (child && typeof child === 'object') {
         sanitizeNode(child as Record<string, unknown>);
+      }
+    }
+  }
+}
+
+function injectCspIntoFullSnapshot(node: Record<string, unknown>): void {
+  const tagName = typeof node.tagName === 'string' ? node.tagName.toLowerCase() : '';
+  if (tagName === 'head' && Array.isArray(node.childNodes)) {
+    const cspMetaNode = {
+      type: 2,
+      tagName: 'meta',
+      attributes: {
+        'http-equiv': 'Content-Security-Policy',
+        content:
+          "default-src 'none'; img-src data: blob:; font-src data:; media-src data: blob:; style-src 'unsafe-inline' data:; script-src 'none'; connect-src 'none'; frame-src 'none'; object-src 'none';"
+      },
+      childNodes: [],
+      id: -99999
+    };
+    node.childNodes.unshift(cspMetaNode);
+    return;
+  }
+
+  if (Array.isArray(node.childNodes)) {
+    for (const child of node.childNodes) {
+      if (child && typeof child === 'object') {
+        injectCspIntoFullSnapshot(child as Record<string, unknown>);
       }
     }
   }
@@ -73,20 +128,74 @@ export function sanitizeReplayEvents(events: unknown[]): unknown[] {
     if (!evt.data || typeof evt.data !== 'object') return event;
 
     const data = evt.data as Record<string, unknown>;
+
+    // 1. FullSnapshot (tipo 2): sanitiza nós e injeta CSP no <head> antes da reconstrução do DOM
     if (evt.type === 2 && data.node && typeof data.node === 'object') {
       const clonedNode = JSON.parse(JSON.stringify(data.node));
       sanitizeNode(clonedNode);
+      injectCspIntoFullSnapshot(clonedNode);
       return { ...evt, data: { ...data, node: clonedNode } };
     }
 
-    if (evt.type === 3 && Array.isArray(data.adds)) {
-      const clonedAdds = JSON.parse(JSON.stringify(data.adds));
-      for (const add of clonedAdds) {
-        if (add && typeof add === 'object' && (add as Record<string, unknown>).node) {
-          sanitizeNode((add as Record<string, unknown>).node as Record<string, unknown>);
+    // 2. IncrementalSnapshot (tipo 3): sanitiza mutações de nós, atributos, textos e regras CSS
+    if (evt.type === 3) {
+      const clonedData = JSON.parse(JSON.stringify(data));
+
+      // 2.1 Adição de nós (Mutation: adds)
+      if (Array.isArray(clonedData.adds)) {
+        for (const add of clonedData.adds) {
+          if (add && typeof add === 'object' && (add as Record<string, unknown>).node) {
+            sanitizeNode((add as Record<string, unknown>).node as Record<string, unknown>);
+          }
         }
       }
-      return { ...evt, data: { ...data, adds: clonedAdds } };
+
+      // 2.2 Alterações posteriores de atributos (Mutation: attributes)
+      if (Array.isArray(clonedData.attributes)) {
+        for (const attrMutation of clonedData.attributes) {
+          if (attrMutation && typeof attrMutation === 'object' && attrMutation.attributes) {
+            sanitizeAttributesMap(attrMutation.attributes as Record<string, unknown>);
+          }
+        }
+      }
+
+      // 2.3 Alterações posteriores de texto / estilo (Mutation: texts)
+      if (Array.isArray(clonedData.texts)) {
+        for (const textMutation of clonedData.texts) {
+          if (textMutation && typeof textMutation === 'object' && typeof textMutation.value === 'string') {
+            textMutation.value = sanitizeCssUrls(textMutation.value);
+          }
+        }
+      }
+
+      // 2.4 Regras CSS dinâmicas (StyleSheetRule)
+      if (Array.isArray(clonedData.rules)) {
+        for (const r of clonedData.rules) {
+          if (r && typeof r === 'object' && typeof r.rule === 'string') {
+            r.rule = sanitizeCssUrls(r.rule);
+          }
+        }
+      }
+
+      // 2.5 Estilos adotados dinamicamente (AdoptedStyleSheet)
+      if (Array.isArray(clonedData.styles)) {
+        for (const s of clonedData.styles) {
+          if (s && typeof s === 'object' && typeof s.styleText === 'string') {
+            s.styleText = sanitizeCssUrls(s.styleText);
+          }
+        }
+      }
+
+      // 2.6 Declarações de estilo inline / CSSOM (StyleDeclaration)
+      if (Array.isArray(clonedData.set)) {
+        for (const s of clonedData.set) {
+          if (s && typeof s === 'object' && typeof s.value === 'string') {
+            s.value = sanitizeCssUrls(s.value);
+          }
+        }
+      }
+
+      return { ...evt, data: clonedData };
     }
 
     return event;
