@@ -3,7 +3,11 @@ import type { FlightRecorderArtifactV1 } from '../../src/types/artifact';
 import { formatIncidentMarkdown } from '../../src/utils/markdown';
 import { uploadArtifactToGist } from '../../src/utils/gist-uploader';
 import { compressArtifact } from '../../src/utils/compression';
+import { isValidAnnotationImage } from '../../src/validation/validate';
 import packageJson from '../../package.json';
+
+let inMemoryGithubToken: string | null = null;
+const MAX_GIST_BYTES = 10 * 1024 * 1024; // 10 MB
 
 interface IncidentHeaderProps {
   artifact: FlightRecorderArtifactV1;
@@ -38,7 +42,7 @@ export const IncidentHeader: React.FC<IncidentHeaderProps> = ({ artifact, onRese
   const [downloadSuccess, setDownloadSuccess] = useState(false);
   const [downloadFormat, setDownloadFormat] = useState<'gzip' | 'uncompressed' | 'ai' | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
-  const [includeLink, setIncludeLink] = useState(true);
+  const [includeLink, setIncludeLink] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
 
@@ -104,7 +108,12 @@ export const IncidentHeader: React.FC<IncidentHeaderProps> = ({ artifact, onRese
         if (existingGistId) {
           replayUrl = `${window.location.origin}/?gist=${existingGistId}`;
         } else {
-          let token = typeof localStorage !== 'undefined' ? localStorage.getItem('backtrack_github_token') : null;
+          const artifactBytes = new TextEncoder().encode(JSON.stringify(artifact)).byteLength;
+          if (artifactBytes > MAX_GIST_BYTES) {
+            throw new Error('O artefato excede o limite máximo permitido pelo GitHub Gist (10 MB).');
+          }
+
+          let token = inMemoryGithubToken;
 
           if (!token || !token.trim()) {
             const prompted = prompt(
@@ -115,11 +124,7 @@ export const IncidentHeader: React.FC<IncidentHeaderProps> = ({ artifact, onRese
               return;
             }
             token = prompted.trim();
-            try {
-              localStorage.setItem('backtrack_github_token', token);
-            } catch {
-              // Ignora erro de quota
-            }
+            inMemoryGithubToken = token;
           }
 
           const result = await uploadArtifactToGist(artifact, token);
@@ -166,11 +171,7 @@ export const IncidentHeader: React.FC<IncidentHeaderProps> = ({ artifact, onRese
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes('401')) {
-        try {
-          localStorage.removeItem('backtrack_github_token');
-        } catch {
-          // Ignora
-        }
+        inMemoryGithubToken = null;
       }
       setExportError(msg);
     } finally {
@@ -183,12 +184,12 @@ export const IncidentHeader: React.FC<IncidentHeaderProps> = ({ artifact, onRese
     setIsGeneratingShareLink(true);
     setShareError(null);
     try {
-      let token = '';
-      try {
-        token = localStorage.getItem('backtrack_github_token') || '';
-      } catch {
-        // Ignora
+      const artifactBytes = new TextEncoder().encode(JSON.stringify(artifact)).byteLength;
+      if (artifactBytes > MAX_GIST_BYTES) {
+        throw new Error('O artefato excede o limite máximo permitido pelo GitHub Gist (10 MB).');
       }
+
+      const token = inMemoryGithubToken || '';
 
       if (!token && !shareTokenInput.trim()) {
         setShowShareTokenPrompt(true);
@@ -198,11 +199,7 @@ export const IncidentHeader: React.FC<IncidentHeaderProps> = ({ artifact, onRese
 
       const activeToken = shareTokenInput.trim() || token;
       if (shareTokenInput.trim()) {
-        try {
-          localStorage.setItem('backtrack_github_token', shareTokenInput.trim());
-        } catch {
-          // Ignora
-        }
+        inMemoryGithubToken = shareTokenInput.trim();
       }
 
       const result = await uploadArtifactToGist(artifact, activeToken);
@@ -218,11 +215,7 @@ export const IncidentHeader: React.FC<IncidentHeaderProps> = ({ artifact, onRese
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes('401')) {
-        try {
-          localStorage.removeItem('backtrack_github_token');
-        } catch {
-          // Ignora
-        }
+        inMemoryGithubToken = null;
         setShowShareTokenPrompt(true);
       }
       setShareError(msg);
@@ -254,7 +247,7 @@ export const IncidentHeader: React.FC<IncidentHeaderProps> = ({ artifact, onRese
         const aiPayload = {
           ...artifact,
           replay: [],
-          _aiNote: 'Replay visual removido para otimizacao de IA (tamanho < 100 KB). Timeline, erros de console e rede preservados.'
+          _aiNote: 'Replay visual removido para otimizacao de IA. Timeline, erros de console e rede preservados.'
         };
         const blob = new Blob([JSON.stringify(aiPayload, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
@@ -327,7 +320,7 @@ export const IncidentHeader: React.FC<IncidentHeaderProps> = ({ artifact, onRese
         </div>
 
         <div className="header-actions">
-          {incident.annotationImage && (
+          {incident.annotationImage && isValidAnnotationImage(incident.annotationImage) && (
             <button
               type="button"
               className="btn-secondary"
@@ -449,12 +442,20 @@ export const IncidentHeader: React.FC<IncidentHeaderProps> = ({ artifact, onRese
                   style={{ marginTop: '2px', width: '16px', height: '16px', accentColor: '#2563eb', cursor: 'pointer' }}
                 />
                 <div>
-                  <div style={{ color: '#f1f5f9', fontSize: '13.5px', fontWeight: 500 }}>Adicionar link do replay interativo?</div>
+                  <div style={{ color: '#f1f5f9', fontSize: '13.5px', fontWeight: 500 }}>
+                    Criar link externo no GitHub Gist (não listado)
+                  </div>
                   <div style={{ color: '#94a3b8', fontSize: '12px', marginTop: '3px', lineHeight: '1.4' }}>
-                    Gera e inclui um link do replay online (via GitHub Gist) no relatorio para que qualquer pessoa da equipe ou IAs possam consultar a sessao diretamente.
+                    Por padrão, a cópia do Markdown é 100% local. Se marcado, enviará o artefato para um Gist não listado no GitHub e incluirá o link no relatório.
                   </div>
                 </div>
               </label>
+
+              {includeLink && (
+                <div style={{ padding: '8px 12px', background: 'rgba(234, 179, 8, 0.1)', border: '1px solid rgba(234, 179, 8, 0.3)', borderRadius: '6px', color: '#fde047', fontSize: '11.5px', lineHeight: '1.4' }}>
+                  <strong>Aviso de privacidade:</strong> Replay visual, URLs visitadas, logs de console, respostas de requisições de rede e anotações serão transmitidos aos servidores do GitHub como um Gist não listado.
+                </div>
+              )}
 
               {exportError && (
                 <div style={{ padding: '8px 12px', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '6px', color: '#fca5a5', fontSize: '12px' }}>
@@ -551,8 +552,11 @@ export const IncidentHeader: React.FC<IncidentHeaderProps> = ({ artifact, onRese
                   <strong style={{ color: '#f8fafc', fontSize: '13px' }}>Compartilhar via Link</strong>
                 </div>
                 <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8', lineHeight: 1.4 }}>
-                  Gera um link do replay online (via GitHub Gist) para qualquer pessoa da equipe assistir no navegador.
+                  Gera um link do replay online (via GitHub Gist não listado) para qualquer pessoa com o link assistir no navegador.
                 </p>
+                <div style={{ padding: '6px 10px', background: 'rgba(234, 179, 8, 0.1)', border: '1px solid rgba(234, 179, 8, 0.3)', borderRadius: '6px', color: '#fde047', fontSize: '11px', lineHeight: '1.35' }}>
+                  <strong>Aviso de privacidade:</strong> Replay visual, URLs visitadas, logs de console, respostas de requisições de rede e anotações serão transmitidos aos servidores do GitHub como um Gist não listado.
+                </div>
 
                 {shareUrl ? (
                   <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
@@ -803,7 +807,7 @@ export const IncidentHeader: React.FC<IncidentHeaderProps> = ({ artifact, onRese
       )}
 
       {/* Modal de Anotação de Tela */}
-      {showAnnotation && incident.annotationImage && (
+      {showAnnotation && incident.annotationImage && isValidAnnotationImage(incident.annotationImage) && (
         <div
           style={{
             position: 'fixed',

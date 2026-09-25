@@ -236,5 +236,96 @@ describe('Lote 0 — Validação do Artefato v1', () => {
     const res = validateFlightRecorderArtifact(mobileArtifact);
     expect(res.success).toBe(true);
   });
+
+  it('rejeita artefato quando triggers contém null ou item inválido', () => {
+    const invalidTriggers = {
+      ...fixtureContent,
+      incident: {
+        ...fixtureContent.incident,
+        triggers: [null]
+      }
+    };
+    const res = validateFlightRecorderArtifact(invalidTriggers);
+    expect(res.success).toBe(false);
+    if (!res.success) {
+      expect(res.errors.some((e) => e.includes('Gatilho no índice 0 deve ser um objeto válido'))).toBe(true);
+    }
+  });
+
+  it('rejeita timeline console quando args não é array', () => {
+    const invalidConsole = {
+      ...fixtureContent,
+      timeline: [
+        {
+          id: 'con_1',
+          timestamp: fixtureContent.incident.startedAt,
+          sequence: 1,
+          type: 'console',
+          level: 'log',
+          args: 'not-an-array' // inválido
+        }
+      ]
+    };
+    const res = validateFlightRecorderArtifact(invalidConsole);
+    expect(res.success).toBe(false);
+    if (!res.success) {
+      expect(res.errors.some((e) => e.includes('deve possuir "args" como array'))).toBe(true);
+    }
+  });
+
+  it('rejeita annotationImage externa (http, https, javascript) e aceita apenas data:base64 segura', () => {
+    const externalImage = {
+      ...fixtureContent,
+      incident: {
+        ...fixtureContent.incident,
+        annotationImage: 'https://malicious.site/exfiltrate?token=123'
+      }
+    };
+    const resExternal = validateFlightRecorderArtifact(externalImage);
+    expect(resExternal.success).toBe(false);
+    if (!resExternal.success) {
+      expect(resExternal.errors.some((e) => e.includes('annotationImage'))).toBe(true);
+    }
+
+    const validDataImage = {
+      ...fixtureContent,
+      incident: {
+        ...fixtureContent.incident,
+        annotationImage: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
+      }
+    };
+    const resValid = validateFlightRecorderArtifact(validDataImage);
+    expect(resValid.success).toBe(true);
+  });
+
+  it('rejeita replayWindow quando requestedEndedAt antecede requestedStartedAt ou preparationEventCount não é inteiro', () => {
+    const invertedReplayWindow = {
+      ...fixtureContent,
+      replayWindow: {
+        requestedStartedAt: 20000,
+        requestedEndedAt: 10000, // invertido
+        preparationEventCount: 0
+      }
+    };
+    const res = validateFlightRecorderArtifact(invertedReplayWindow);
+    expect(res.success).toBe(false);
+    if (!res.success) {
+      expect(res.errors.some((e) => e.includes('requestedEndedAt'))).toBe(true);
+    }
+
+    const floatPrepCount = {
+      ...fixtureContent,
+      replayWindow: {
+        requestedStartedAt: 10000,
+        requestedEndedAt: 20000,
+        preparationEventCount: 3.5 // float inválido
+      }
+    };
+    const resFloat = validateFlightRecorderArtifact(floatPrepCount);
+    expect(resFloat.success).toBe(false);
+    if (!resFloat.success) {
+      expect(resFloat.errors.some((e) => e.includes('preparationEventCount'))).toBe(true);
+    }
+  });
 });
 

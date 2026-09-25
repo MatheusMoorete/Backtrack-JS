@@ -278,6 +278,7 @@ export const App: React.FC = () => {
             >
               <TimelineView
                 events={artifact.timeline}
+                replayEvents={artifact.replay}
                 startedAt={artifact.incident.startedAt}
                 currentTimeMs={currentTimeMs}
                 onSelectEvent={handleSeek}

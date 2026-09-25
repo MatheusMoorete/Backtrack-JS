@@ -29,9 +29,10 @@ export class BacktrackWidget {
   private selectedIncidentId: string | null = null;
 
   private exportModalIncidentId: string | null = null;
-  private exportModalIncludeLink = true;
+  private exportModalIncludeLink = false;
   private isExportingMarkdown = false;
   private exportModalError: string | null = null;
+  private static sessionGithubToken: string | null = null;
 
   private downloadModalIncidentId: string | null = null;
   private downloadModalFormat: 'gzip' | 'uncompressed' | 'ai' | null = null;
@@ -409,7 +410,7 @@ export class BacktrackWidget {
 
   private openExportModal(incidentId: string): void {
     this.exportModalIncidentId = incidentId;
-    this.exportModalIncludeLink = true;
+    this.exportModalIncludeLink = false;
     this.exportModalError = null;
     this.isExportingMarkdown = false;
     this.render();
@@ -435,7 +436,13 @@ export class BacktrackWidget {
       let replayUrl: string | undefined;
 
       if (this.exportModalIncludeLink) {
-        let token = typeof localStorage !== 'undefined' ? localStorage.getItem('backtrack_github_token') : null;
+        const artifactBytes = new TextEncoder().encode(JSON.stringify(artifact)).byteLength;
+        const maxGistBytes = 10 * 1024 * 1024; // 10 MB
+        if (artifactBytes > maxGistBytes) {
+          throw new Error('O artefato excede o limite máximo permitido pelo GitHub Gist (10 MB).');
+        }
+
+        let token = BacktrackWidget.sessionGithubToken;
 
         if (!token || !token.trim()) {
           const prompted = prompt(
@@ -447,11 +454,7 @@ export class BacktrackWidget {
             return;
           }
           token = prompted.trim();
-          try {
-            localStorage.setItem('backtrack_github_token', token);
-          } catch {
-            // Ignora
-          }
+          BacktrackWidget.sessionGithubToken = token;
         }
 
         const result = await uploadArtifactToGist(artifact, token);
@@ -500,11 +503,7 @@ export class BacktrackWidget {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes('401')) {
-        try {
-          localStorage.removeItem('backtrack_github_token');
-        } catch {
-          // Ignora
-        }
+        BacktrackWidget.sessionGithubToken = null;
       }
       this.exportModalError = `Falha: ${msg}`;
       this.isExportingMarkdown = false;
@@ -1256,10 +1255,15 @@ export class BacktrackWidget {
             <label class="backtrack-modal-checkbox-label">
               <input type="checkbox" id="check-include-incident-link" ${this.exportModalIncludeLink ? 'checked' : ''} ${this.isExportingMarkdown ? 'disabled' : ''} />
               <div>
-                <span class="backtrack-modal-checkbox-title">Adicionar link do replay interativo?</span>
-                <p class="backtrack-modal-checkbox-desc">Gera e inclui o link publico do replay online (GitHub Gist) no relatorio para que a equipe ou IAs possam inspecionar a sessao.</p>
+                <span class="backtrack-modal-checkbox-title">Criar link externo no GitHub Gist (não listado)</span>
+                <p class="backtrack-modal-checkbox-desc">Por padrão, a cópia do Markdown é 100% local. Se marcado, enviará o artefato para um Gist não listado no GitHub e incluirá o link no relatório.</p>
               </div>
             </label>
+            ${this.exportModalIncludeLink ? `
+              <div style="margin-top: 8px; padding: 8px 10px; background: rgba(234, 179, 8, 0.1); border: 1px solid rgba(234, 179, 8, 0.3); border-radius: 6px; color: #fde047; font-size: 11.5px; line-height: 1.4;">
+                <strong>Aviso de privacidade:</strong> Replay visual, URLs visitadas, logs de console, respostas de rede e anotações serão transmitidos aos servidores do GitHub como um Gist não listado.
+              </div>
+            ` : ''}
             ${this.exportModalError ? `<div class="backtrack-modal-error">${this.exportModalError}</div>` : ''}
           </div>
           <div class="backtrack-modal-footer">
@@ -1648,6 +1652,7 @@ export class BacktrackWidget {
       });
       this.shadow.getElementById('check-include-incident-link')?.addEventListener('change', (e) => {
         this.exportModalIncludeLink = (e.target as HTMLInputElement).checked;
+        this.render();
       });
       this.shadow.getElementById('btn-confirm-export-modal')?.addEventListener('click', () => {
         this.confirmCopyMarkdown();

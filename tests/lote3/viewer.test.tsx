@@ -176,6 +176,39 @@ describe('Lote 3 — Viewer do Flight Recorder', () => {
     expect(onSelect).toHaveBeenCalledWith(validArtifact.timeline[0].timestamp);
   });
 
+  it('lista interações do replay sem expor o conteúdo digitado', () => {
+    const onSelect = vi.fn();
+    const timestamp = validArtifact.incident.startedAt + 1000;
+    render(
+      <TimelineView
+        events={[]}
+        replayEvents={[
+          { type: 3, timestamp, data: { source: 2, type: 2, id: 11, x: 120, y: 180 } },
+          { type: 3, timestamp: timestamp + 1000, data: { source: 5, id: 12, text: 'segredo' } },
+          { type: 3, timestamp: timestamp + 2000, data: { source: 3, id: 13, x: 0, y: 300 } }
+        ]}
+        startedAt={validArtifact.incident.startedAt}
+        currentTimeMs={0}
+        onSelectEvent={onSelect}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('tab', { name: /Interações/ }));
+
+    expect(screen.getByText(/Click em elemento #11/i)).toBeDefined();
+    expect(screen.getByText(/Elemento #12 alterado — conteúdo oculto/i)).toBeDefined();
+    expect(screen.queryByText('segredo')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Input' }));
+    expect(screen.getByText(/Elemento #12 alterado — conteúdo oculto/i)).toBeDefined();
+    expect(screen.queryByText(/Click em elemento #11/i)).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'All' }));
+
+    fireEvent.click(screen.getByText(/Click em elemento #11/i));
+    expect(onSelect).toHaveBeenCalledWith(timestamp);
+  });
+
   it('PROVA DE SEGURANÇA: nenhuma requisição de rede externa é realizada ao abrir e inspecionar a fixture', async () => {
     render(<App />);
 

@@ -161,10 +161,13 @@ describe('Backtrack v0.1.2 — Widget Nativo e Privacidade por Rota', () => {
       const modal = host?.shadowRoot?.querySelector('.backtrack-modal-card');
       expect(modal).not.toBeNull();
       expect(modal?.textContent).toContain('Markdown para debug');
-      expect(modal?.textContent).toContain('Adicionar link do replay interativo?');
+      expect(modal?.textContent).toContain('Criar link externo no GitHub Gist (não listado)');
 
-      // Desmarca a opção de link interativo do replay
+      // Verifica que a opção de link interativo inicia DESMARCADA por padrão (100% local)
       const checkIncludeLink = host?.shadowRoot?.getElementById('check-include-incident-link') as HTMLInputElement;
+      expect(checkIncludeLink.checked).toBe(false);
+      checkIncludeLink.checked = true;
+      checkIncludeLink.dispatchEvent(new Event('change'));
       expect(checkIncludeLink.checked).toBe(true);
       checkIncludeLink.checked = false;
       checkIncludeLink.dispatchEvent(new Event('change'));

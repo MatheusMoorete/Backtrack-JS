@@ -1,8 +1,97 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { Replayer } from '@rrweb/replay';
 import '@rrweb/replay/dist/style.css';
 import type { RrwebEvent } from '../../src/types/chunk';
 import type { TimelineEvent } from '../../src/types/timeline';
+import { isValidAnnotationImage } from '../../src/validation/validate';
+
+function isExternalUrl(url: string): boolean {
+  const trimmed = url.trim().toLowerCase();
+  return (
+    trimmed.startsWith('http:') ||
+    trimmed.startsWith('https:') ||
+    trimmed.startsWith('//') ||
+    trimmed.startsWith('javascript:') ||
+    trimmed.startsWith('file:')
+  );
+}
+
+function sanitizeCssUrls(css: string): string {
+  return css.replace(/url\(\s*['"]?\s*(?:https?:|\/\/)[^'")]+['"]?\s*\)/gi, 'none');
+}
+
+function sanitizeNode(node: Record<string, unknown>): void {
+  if (typeof node.tagName === 'string') {
+    const tag = node.tagName.toLowerCase();
+    if (tag === 'script') {
+      node.childNodes = [];
+      if (node.attributes && typeof node.attributes === 'object') {
+        (node.attributes as Record<string, unknown>).src = '';
+      }
+    }
+  }
+
+  if (node.attributes && typeof node.attributes === 'object') {
+    const attrs = node.attributes as Record<string, unknown>;
+    for (const key of Object.keys(attrs)) {
+      if (key.toLowerCase().startsWith('on')) {
+        delete attrs[key];
+      }
+    }
+
+    if (typeof attrs.src === 'string' && isExternalUrl(attrs.src)) {
+      attrs.src = 'data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%221%22%20height%3D%221%22%2F%3E';
+    }
+    if (typeof attrs.srcset === 'string' && isExternalUrl(attrs.srcset)) {
+      attrs.srcset = '';
+    }
+    if (typeof attrs.poster === 'string' && isExternalUrl(attrs.poster)) {
+      attrs.poster = '';
+    }
+    if (typeof attrs.href === 'string' && isExternalUrl(attrs.href)) {
+      attrs.href = '#';
+    }
+    if (typeof attrs.style === 'string') {
+      attrs.style = sanitizeCssUrls(attrs.style);
+    }
+  }
+
+  if (Array.isArray(node.childNodes)) {
+    for (const child of node.childNodes) {
+      if (child && typeof child === 'object') {
+        sanitizeNode(child as Record<string, unknown>);
+      }
+    }
+  }
+}
+
+export function sanitizeReplayEvents(events: unknown[]): unknown[] {
+  if (!Array.isArray(events)) return [];
+  return events.map((event) => {
+    if (!event || typeof event !== 'object') return event;
+    const evt = event as Record<string, unknown>;
+    if (!evt.data || typeof evt.data !== 'object') return event;
+
+    const data = evt.data as Record<string, unknown>;
+    if (evt.type === 2 && data.node && typeof data.node === 'object') {
+      const clonedNode = JSON.parse(JSON.stringify(data.node));
+      sanitizeNode(clonedNode);
+      return { ...evt, data: { ...data, node: clonedNode } };
+    }
+
+    if (evt.type === 3 && Array.isArray(data.adds)) {
+      const clonedAdds = JSON.parse(JSON.stringify(data.adds));
+      for (const add of clonedAdds) {
+        if (add && typeof add === 'object' && (add as Record<string, unknown>).node) {
+          sanitizeNode((add as Record<string, unknown>).node as Record<string, unknown>);
+        }
+      }
+      return { ...evt, data: { ...data, adds: clonedAdds } };
+    }
+
+    return event;
+  });
+}
 
 interface ReplayPlayerProps {
   events: RrwebEvent[];
@@ -52,6 +141,11 @@ export const ReplayPlayer: React.FC<ReplayPlayerProps> = ({
   const [replayError, setReplayError] = useState<string | null>(null);
   const [containerSize, setContainerSize] = useState({ width: 800, height: 600 });
   const [tickerOffsetMs, setTickerOffsetMs] = useState<number | null>(null);
+  const [allowCanvasReplay, setAllowCanvasReplay] = useState(false);
+
+  const safeAnnotationImage = useMemo(() => {
+    return annotationImage && isValidAnnotationImage(annotationImage) ? annotationImage : undefined;
+  }, [annotationImage]);
 
   const totalDurationMs = Math.max(1000, finalizedAt - startedAt);
   const viewport = getViewportDimensions(events);
@@ -122,8 +216,10 @@ export const ReplayPlayer: React.FC<ReplayPlayerProps> = ({
       containerRef.current.innerHTML = '';
       setReplayError(null);
 
+      const safeEvents = sanitizeReplayEvents(events);
+
       const replayer = new Replayer(
-        events as unknown as ConstructorParameters<typeof Replayer>[0],
+        safeEvents as unknown as ConstructorParameters<typeof Replayer>[0],
         {
           root: containerRef.current,
           speed,
@@ -135,12 +231,25 @@ export const ReplayPlayer: React.FC<ReplayPlayerProps> = ({
             lineWidth: 3,
             strokeStyle: '#3b82f6'
           },
-          UNSAFE_replayCanvas: true,
-          UNSAFE_allowUnprotectedRebuild: true
+          UNSAFE_replayCanvas: allowCanvasReplay
         } as unknown as ConstructorParameters<typeof Replayer>[1]
       );
 
       replayerRef.current = replayer;
+
+      // Injeta CSP no iframe do replay para bloquear imagens, fontes, mídias e conexões externas
+      const iframe = containerRef.current.querySelector('iframe');
+      if (iframe && iframe.contentDocument) {
+        try {
+          const meta = iframe.contentDocument.createElement('meta');
+          meta.httpEquiv = 'Content-Security-Policy';
+          meta.content =
+            "default-src 'none'; img-src data: blob:; font-src data:; media-src data: blob:; style-src 'unsafe-inline' data:; script-src 'none'; connect-src 'none'; frame-src 'none'; object-src 'none';";
+          iframe.contentDocument.head?.prepend(meta);
+        } catch {
+          // Noop caso o iframe esteja inacessível em modo sandbox restrito
+        }
+      }
 
       const initialOffset = Math.max(0, currentTimeMs - startedAt);
       replayer.pause(initialOffset);
@@ -163,7 +272,7 @@ export const ReplayPlayer: React.FC<ReplayPlayerProps> = ({
         replayerRef.current = null;
       }
     };
-  }, [events]);
+  }, [events, allowCanvasReplay]);
 
   // Atualiza velocidade
   useEffect(() => {
@@ -507,9 +616,9 @@ export const ReplayPlayer: React.FC<ReplayPlayerProps> = ({
             />
 
             {/* Camada de Anotação Visual do QA (réguas, setas, desenhos) - exibida automaticamente no momento da anotação */}
-            {annotationImage && isAtAnnotationTime && (
+            {safeAnnotationImage && isAtAnnotationTime && (
               <img
-                src={annotationImage}
+                src={safeAnnotationImage}
                 alt="Anotações do QA sobre o Replay"
                 className="replay-annotation-overlay-layer"
                 style={{
@@ -748,6 +857,31 @@ export const ReplayPlayer: React.FC<ReplayPlayerProps> = ({
           </div>
 
           <div className="controls-right-group">
+            <div
+              className="control-item"
+              title="Permitir canvas somente para gravações confiáveis (risco de execução de scripts de renderização)"
+            >
+              <label
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  fontSize: '11px',
+                  color: allowCanvasReplay ? '#60a5fa' : '#94a3b8',
+                  cursor: 'pointer',
+                  userSelect: 'none'
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={allowCanvasReplay}
+                  onChange={(e) => setAllowCanvasReplay(e.target.checked)}
+                  aria-label="Permitir canvas somente para gravações confiáveis"
+                />
+                <span>Canvas Confiável</span>
+              </label>
+            </div>
+
             <div className="control-item">
               <label htmlFor="speed-select" className="control-label">
                 Vel:

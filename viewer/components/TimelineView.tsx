@@ -1,14 +1,95 @@
 import React, { useState, useMemo } from 'react';
 import type { TimelineEvent, TimelineEventType } from '../../src/types/timeline';
+import type { RrwebEvent } from '../../src/types/chunk';
 
 interface TimelineViewProps {
   events: TimelineEvent[];
+  replayEvents?: RrwebEvent[];
   startedAt?: number;
   currentTimeMs: number;
   onSelectEvent: (timestampMs: number) => void;
 }
 
 type FilterCategory = 'all' | TimelineEventType;
+type ViewMode = 'events' | 'interactions';
+type InteractionCategory = 'click' | 'input' | 'focus' | 'scroll' | 'resize' | 'touch';
+type InteractionFilter = 'all' | InteractionCategory;
+
+interface InteractionEvent {
+  id: string;
+  timestamp: number;
+  category: InteractionCategory;
+  badge: string;
+  summary: string;
+  meta?: string;
+}
+
+const mouseInteractionLabels: Record<number, string> = {
+  0: 'Mouse up',
+  1: 'Mouse down',
+  2: 'Click',
+  3: 'Menu de contexto',
+  4: 'Duplo click',
+  5: 'Foco',
+  6: 'Perda de foco',
+  7: 'Toque iniciado',
+  9: 'Toque finalizado',
+  10: 'Toque cancelado'
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+export function extractInteractions(events: RrwebEvent[]): InteractionEvent[] {
+  return events.flatMap((event, index) => {
+    if (event.type !== 3 || !isRecord(event.data)) return [];
+
+    const data = event.data;
+    const source = data.source;
+    const target = typeof data.id === 'number' ? `Elemento #${data.id}` : 'Elemento';
+    const interaction = (
+      category: InteractionCategory,
+      badge: string,
+      summary: string,
+      meta?: string
+    ): InteractionEvent[] => [{
+      id: `${event.timestamp}-${index}`,
+      timestamp: event.timestamp,
+      category,
+      badge,
+      summary,
+      meta
+    }];
+
+    if (source === 2 && typeof data.type === 'number') {
+      const label = mouseInteractionLabels[data.type];
+      if (!label) return [];
+      const coordinates = typeof data.x === 'number' && typeof data.y === 'number'
+        ? `${data.x}, ${data.y}`
+        : undefined;
+      const category: InteractionCategory = data.type === 5 || data.type === 6
+        ? 'focus'
+        : data.type >= 7
+          ? 'touch'
+          : 'click';
+      return interaction(category, label.toUpperCase(), `${label} em ${target.toLowerCase()}`, coordinates);
+    }
+    if (source === 3) {
+      const position = typeof data.x === 'number' && typeof data.y === 'number'
+        ? `${data.x}, ${data.y}`
+        : undefined;
+      return interaction('scroll', 'SCROLL', `Rolagem em ${target.toLowerCase()}`, position);
+    }
+    if (source === 4 && typeof data.width === 'number' && typeof data.height === 'number') {
+      return interaction('resize', 'RESIZE', 'Viewport redimensionado', `${data.width} × ${data.height}`);
+    }
+    if (source === 5) {
+      return interaction('input', 'INPUT', `${target} alterado — conteúdo oculto`);
+    }
+    return [];
+  });
+}
 
 function formatRelativeOffset(timestampMs: number, startedAt?: number): string {
   if (!startedAt || timestampMs < startedAt) return '+00:00';
@@ -40,13 +121,36 @@ export function isErrorTimelineEvent(evt: TimelineEvent): boolean {
 
 export const TimelineView: React.FC<TimelineViewProps> = ({
   events,
+  replayEvents = [],
   startedAt,
   currentTimeMs,
   onSelectEvent
 }) => {
+  const [viewMode, setViewMode] = useState<ViewMode>('events');
   const [activeFilter, setActiveFilter] = useState<FilterCategory>('all');
+  const [interactionFilter, setInteractionFilter] = useState<InteractionFilter>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const interactions = useMemo(() => extractInteractions(replayEvents), [replayEvents]);
+  const filteredInteractions = useMemo(
+    () => interactionFilter === 'all'
+      ? interactions
+      : interactions.filter((interaction) => interaction.category === interactionFilter),
+    [interactionFilter, interactions]
+  );
+  const interactionCounts = useMemo(() => {
+    const counts: Record<InteractionFilter, number> = {
+      all: interactions.length,
+      click: 0,
+      input: 0,
+      focus: 0,
+      scroll: 0,
+      resize: 0,
+      touch: 0
+    };
+    for (const interaction of interactions) counts[interaction.category]++;
+    return counts;
+  }, [interactions]);
 
   const counts = useMemo(() => {
     let errorCount = 0;
@@ -270,7 +374,28 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
   return (
     <aside className="timeline-pane" data-purpose="timeline-feed-column">
       <div className="timeline-header">
-        <div className="search-input-wrap">
+        <div className="filter-tabs-row" role="tablist" aria-label="Tipo de atividade">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={viewMode === 'events'}
+            className={`filter-tab ${viewMode === 'events' ? 'active' : ''}`}
+            onClick={() => setViewMode('events')}
+          >
+            Logs
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={viewMode === 'interactions'}
+            className={`filter-tab ${viewMode === 'interactions' ? 'active' : ''}`}
+            onClick={() => setViewMode('interactions')}
+          >
+            Interações <span className="tab-count" aria-hidden="true">{interactions.length}</span>
+          </button>
+        </div>
+
+        {viewMode === 'events' && <div className="search-input-wrap">
           <span className="search-icon" aria-hidden="true">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="11" cy="11" r="8" />
@@ -285,9 +410,9 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
             onChange={(e) => setSearchQuery(e.target.value)}
             aria-label="Buscar na timeline"
           />
-        </div>
+        </div>}
 
-        <div className="filter-tabs-row" role="group" aria-label="Filtros de categoria">
+        {viewMode === 'events' && <div className="filter-tabs-row" role="group" aria-label="Filtros de categoria">
           {(
             [
               ['all', 'All'],
@@ -316,11 +441,65 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
               </button>
             );
           })}
-        </div>
+        </div>}
+        {viewMode === 'interactions' && <div className="filter-tabs-row" role="group" aria-label="Filtros de interação">
+          {(
+            [
+              ['all', 'All'],
+              ['click', 'Clicks'],
+              ['input', 'Input'],
+              ['focus', 'Foco'],
+              ['scroll', 'Scroll'],
+              ['resize', 'Resize'],
+              ['touch', 'Toque']
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              className={`filter-tab filter-btn ${interactionFilter === key ? 'active' : ''}`}
+              onClick={() => setInteractionFilter(key)}
+              aria-label={label}
+            >
+              <span>{label}</span>
+              <span className="tab-count" aria-hidden="true">{interactionCounts[key]}</span>
+            </button>
+          ))}
+        </div>}
       </div>
 
       <div className="timeline-list" role="feed" aria-label="Lista de eventos da timeline">
-        {filteredEvents.length === 0 ? (
+        {viewMode === 'interactions' ? (
+          filteredInteractions.length === 0 ? (
+            <div className="timeline-empty-message">Nenhuma interação capturada.</div>
+          ) : filteredInteractions.map((interaction) => (
+            <article
+              key={interaction.id}
+              className={`timeline-item ${Math.abs(interaction.timestamp - currentTimeMs) < 1500 ? 'active' : ''}`}
+              onClick={() => onSelectEvent(interaction.timestamp)}
+              role="article"
+              tabIndex={0}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') onSelectEvent(interaction.timestamp);
+              }}
+            >
+              <div className="timeline-row-main">
+                <span className="timeline-col-time" title={new Date(interaction.timestamp).toISOString()}>
+                  {formatRelativeOffset(interaction.timestamp, startedAt)}
+                </span>
+                <div className="timeline-col-badge-wrap">
+                  <span className="timeline-badge badge-neutral">{interaction.badge}</span>
+                </div>
+                <div className="timeline-col-summary">
+                  <span className="timeline-summary-text">{interaction.summary}</span>
+                </div>
+                {interaction.meta && <div className="timeline-col-status">
+                  <span className="timeline-col-meta">{interaction.meta}</span>
+                </div>}
+              </div>
+            </article>
+          ))
+        ) : filteredEvents.length === 0 ? (
           <div className="timeline-empty-message">
             Nenhum evento encontrado para os filtros selecionados.
           </div>
@@ -480,7 +659,9 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
       <div className="timeline-footer">
         <span className="timeline-footer-status">Feed sincronizado com o player</span>
         <span className="timeline-footer-count">
-          {filteredEvents.length} de {events.length} logs exibidos
+          {viewMode === 'interactions'
+            ? `${filteredInteractions.length} de ${interactions.length} interações`
+            : `${filteredEvents.length} de ${events.length} logs exibidos`}
         </span>
       </div>
     </aside>

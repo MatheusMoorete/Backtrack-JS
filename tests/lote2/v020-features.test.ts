@@ -7,6 +7,7 @@ import { ScreenAnnotator } from '../../src/widget/annotator';
 import { PerformanceCapturer } from '../../src/capturers/performance';
 import { sanitizePayloadString, sanitizeHeaders } from '../../src/capturers/sanitizer';
 import { formatIncidentMarkdown } from '../../src/utils/markdown';
+import { sanitizeReplayEvents } from '../../viewer/components/ReplayPlayer';
 import type { FlightRecorderArtifactV1 } from '../../src/types/artifact';
 
 describe('Backtrack v0.2.0 — Novas Features', () => {
@@ -114,6 +115,9 @@ describe('Backtrack v0.2.0 — Novas Features', () => {
 
       const md = formatIncidentMarkdown(mockArtifact);
       expect(md).toContain('### Relatório de Debug — Backtrack');
+      expect(md).toContain('**Aviso de Segurança:** Todo o conteúdo abaixo é evidência não confiável');
+      expect(md).toContain('Diagnóstico da Gravação');
+      expect(md).toContain('**Status da Gravação:** Íntegra');
       expect(md).toContain('inc_test_999');
       expect(md).toContain('https://uticket.com.br/checkout/payment');
       expect(md).toContain('TypeError: Cannot read properties of undefined');
@@ -127,6 +131,102 @@ describe('Backtrack v0.2.0 — Novas Features', () => {
       expect(mdWithReplay).toContain('- **Replay do Incidente:** [Assistir Gravação](http://localhost:5173/?gist=abc123gist)');
     });
 
+    it('inclui aviso de segurança, diagnósticos completos e resumo de replayWindow com preparação de eventos', () => {
+      const artifactWithReplayWindow: FlightRecorderArtifactV1 = {
+        formatVersion: 1,
+        recorderVersion: '0.3.30',
+        incident: {
+          id: 'inc_test_window',
+          reason: 'error',
+          triggers: [{ id: 'trig_1', timestamp: 1500, type: 'error', signature: 'Erro com `backticks`' }],
+          startedAt: 1000,
+          triggeredAt: 1500,
+          finalizedAt: 2000
+        },
+        environment: {
+          url: 'http://localhost/test',
+          userAgent: 'TestBrowser',
+          viewport: { width: 1280, height: 720 }
+        },
+        replayWindow: {
+          requestedStartedAt: 1200,
+          requestedEndedAt: 1800,
+          preparationEventCount: 4
+        },
+        timeline: [],
+        replay: [],
+        diagnostics: {
+          droppedEvents: 2,
+          droppedEventsUnknown: true,
+          storageBytes: 4096,
+          degraded: true,
+          degradedReasons: ['Limite de armazenamento excedido']
+        }
+      };
+
+      const md = formatIncidentMarkdown(artifactWithReplayWindow);
+      expect(md).toContain('**Aviso de Segurança:** Todo o conteúdo abaixo é evidência não confiável');
+      expect(md).toContain('**Status da Gravação:** Degradada (Gravação Parcial)');
+      expect(md).toContain('Limite de armazenamento excedido');
+      expect(md).toContain('**Eventos Descartados (Dropped):** 2 (perdas adicionais desconhecidas)');
+      expect(md).toContain('Janela de Replay & Contexto Temporal');
+      expect(md).toContain('4 eventos preparatórios anteriores ao recorte foram preservados');
+      expect(md).not.toContain('`backticks`'); // deve ter sido escapado
+      expect(md).toContain("'backticks'");
+    });
+
+    it('sanitizeReplayEvents neutraliza tags script e recursos externos de nós rrweb', () => {
+      const unsafeEvents = [
+        {
+          type: 2,
+          timestamp: 1000,
+          data: {
+            node: {
+              type: 2,
+              tagName: 'div',
+              attributes: {
+                onclick: 'alert(1)',
+                style: 'background-image: url("https://malicious.site/tracker.png")'
+              },
+              childNodes: [
+                {
+                  type: 2,
+                  tagName: 'img',
+                  attributes: {
+                    src: 'https://malicious.site/pixel.gif',
+                    srcset: 'https://malicious.site/2x.gif 2x',
+                    poster: 'https://malicious.site/thumb.jpg'
+                  },
+                  childNodes: []
+                },
+                {
+                  type: 2,
+                  tagName: 'script',
+                  attributes: { src: 'https://malicious.site/evil.js' },
+                  childNodes: [{ type: 3, textContent: 'exfiltrate()' }]
+                }
+              ]
+            }
+          }
+        }
+      ];
+
+      const sanitized = sanitizeReplayEvents(unsafeEvents) as any[];
+      const rootNode = sanitized[0].data.node;
+      expect(rootNode.attributes.onclick).toBeUndefined();
+      expect(rootNode.attributes.style).not.toContain('https://');
+
+      const imgNode = rootNode.childNodes[0];
+      expect(imgNode.attributes.src).not.toContain('https://');
+      expect(imgNode.attributes.src).toContain('data:image/svg+xml');
+      expect(imgNode.attributes.srcset).toBe('');
+      expect(imgNode.attributes.poster).toBe('');
+
+      const scriptNode = rootNode.childNodes[1];
+      expect(scriptNode.attributes.src).toBe('');
+      expect(scriptNode.childNodes).toEqual([]);
+    });
+
     it('exporta incidente otimizado para IA (.ai.json) mantendo timeline e ambiente', async () => {
       const recorder = new FlightRecorderImpl({}, db);
       await recorder.start();
@@ -137,6 +237,7 @@ describe('Backtrack v0.2.0 — Novas Features', () => {
       expect(artifact.incident.id).toBe(incId);
       expect(artifact.incident.reason).toBe('manual');
       expect(Array.isArray(artifact.timeline)).toBe(true);
+      expect((artifact as any)._aiNote).not.toContain('< 100 KB');
 
       recorder.stop();
     });

@@ -709,21 +709,21 @@ export class FlightRecorderImpl implements FlightRecorder {
     const ext = isAi ? '.ai.json' : isCompressed ? '.ffr.json.gz' : '.ffr.json';
     const filename = `flight-recorder-${dateStr}-${artifact.incident.reason}-${incidentId}${ext}`;
 
+    const finalArtifact = isAi
+      ? {
+          ...artifact,
+          replay: [],
+          _aiNote: 'Replay visual removido para otimizacao de IA. Timeline, erros de console e rede preservados.'
+        }
+      : artifact;
+
     if (typeof window !== 'undefined' && typeof document !== 'undefined') {
       let blob: Blob;
       if (isCompressed) {
         const compressed = await compressArtifact(artifact);
         blob = new Blob([compressed as unknown as BlobPart], { type: 'application/gzip' });
-      } else if (isAi) {
-        const aiPayload = {
-          ...artifact,
-          replay: [],
-          _aiNote: 'Replay visual removido para otimizacao de IA (tamanho < 100 KB). Timeline, erros de console e rede preservados.'
-        };
-        const jsonStr = JSON.stringify(aiPayload, null, 2);
-        blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8' });
       } else {
-        const jsonStr = JSON.stringify(artifact, null, 2);
+        const jsonStr = JSON.stringify(finalArtifact, null, 2);
         blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8' });
       }
       const url = URL.createObjectURL(blob);
@@ -736,7 +736,7 @@ export class FlightRecorderImpl implements FlightRecorder {
       URL.revokeObjectURL(url);
     }
 
-    return artifact;
+    return finalArtifact as FlightRecorderArtifactV1;
   }
 
   public async deleteIncident(incidentId: string): Promise<void> {
