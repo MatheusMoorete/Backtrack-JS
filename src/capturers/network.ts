@@ -366,7 +366,7 @@ export class NetworkCapturer {
       (params.status === 0 && params.result === 'error');
 
     if (isTrigger) {
-      this.incidentManager.trigger('http', {
+      void this.incidentManager.trigger('http', {
         id: `trig_http_${now}_${Math.random().toString(36).substring(2, 7)}`,
         timestamp: now,
         type: 'http',
@@ -377,6 +377,8 @@ export class NetworkCapturer {
           status: params.status,
           result: params.result
         }
+      }).catch(() => {
+        // Ignora e não propaga erro para o runtime
       });
     }
   }

@@ -325,4 +325,26 @@ describe('Lote 2 — Sincronização de incident_pending com IncidentManager', (
     expect(incidents.length).toBe(1);
     expect(incidents[0].triggerCount).toBe(2);
   });
+
+  it('falha interna no IncidentManager marca o recorder como degradado sem escapar para a aplicação', async () => {
+    const unhandledSpy = vi.fn();
+    window.addEventListener('unhandledrejection', unhandledSpy);
+
+    // Simula falha no método de persistência do db do IncidentManager
+    const customDb = (recorder as unknown as { db: FlightRecorderDB }).db;
+    vi.spyOn(customDb, 'putIncident').mockRejectedValue(new Error('IndexedDB storage fault'));
+
+    // captureException não deve propagar erro para o chamador nem causar unhandledrejection
+    await recorder.captureException(new Error('Erro capturado'));
+
+    await vi.advanceTimersByTimeAsync(50);
+    expect(unhandledSpy).not.toHaveBeenCalled();
+
+    // Recorder foi degradado internamente
+    const health = recorder.getHealth();
+    expect(health.state).toBe('degraded');
+    expect(health.reasons.some((r) => r.includes('gerenciamento de incidentes'))).toBe(true);
+
+    window.removeEventListener('unhandledrejection', unhandledSpy);
+  });
 });

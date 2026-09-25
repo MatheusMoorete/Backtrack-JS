@@ -54,7 +54,7 @@ export class ErrorCapturer {
       const lineno = event.lineno || undefined;
       const colno = event.colno || undefined;
 
-      this.recordAndTriggerError({
+      void this.recordAndTriggerError({
         source: 'window',
         name,
         message,
@@ -62,7 +62,7 @@ export class ErrorCapturer {
         filename,
         lineno,
         colno
-      });
+      }).catch(() => {});
     } catch {
       // Ignora erro interno
     }
@@ -87,12 +87,12 @@ export class ErrorCapturer {
         message = redactSensitiveString(JSON.stringify(reason));
       }
 
-      this.recordAndTriggerError({
+      void this.recordAndTriggerError({
         source: 'unhandledrejection',
         name,
         message,
         stack
-      });
+      }).catch(() => {});
     } catch {
       // Ignora erro interno
     }
@@ -130,7 +130,7 @@ export class ErrorCapturer {
         message,
         stack,
         componentStack
-      });
+      }).catch(() => undefined);
     } catch {
       // Não relança
     }

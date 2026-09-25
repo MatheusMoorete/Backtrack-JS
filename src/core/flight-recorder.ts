@@ -324,6 +324,21 @@ export class FlightRecorderImpl implements FlightRecorder {
         this.updateStatsCache();
       });
 
+      this.incidentManager.setOnError((err) => {
+        const isQuota =
+          (err instanceof Error && (err.name === 'QuotaExceededError' || err.message?.includes('QuotaExceededError'))) ||
+          (typeof DOMException !== 'undefined' && err instanceof DOMException && err.name === 'QuotaExceededError');
+
+        if (isQuota) {
+          this.handleQuotaExceeded();
+        } else {
+          this.stateMachine.transition({
+            type: 'DEGRADE',
+            reason: 'Falha no gerenciamento de incidentes; o incidente pode não ter sido salvo completamente.'
+          });
+        }
+      });
+
       this.incidentManager.setBeforeFinalize(async () => {
         if (this.writer) {
           await this.writer.flush();

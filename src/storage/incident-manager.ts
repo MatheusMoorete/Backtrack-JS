@@ -128,6 +128,7 @@ export class IncidentManager {
   private onIncidentPendingCallback?: (incident: StoredIncident) => void;
   private onIncidentFinalizedCallback?: (incident: StoredIncident) => void;
   private beforeFinalizeCallback?: () => Promise<void>;
+  private onErrorCallback?: (error: unknown) => void;
   private activeOperation: Promise<unknown> | null = null;
 
   constructor(
@@ -149,26 +150,40 @@ export class IncidentManager {
   }
 
   private serializeOperation<T>(op: () => Promise<T>): Promise<T> {
-    if (!this.activeOperation) {
-      const promise = op();
-      this.activeOperation = promise;
-      promise.finally(() => {
-        if (this.activeOperation === promise) {
+    let opPromise: Promise<T>;
+    const wrappedOp = async () => {
+      try {
+        return await op();
+      } catch (err) {
+        if (this.onErrorCallback) {
+          try {
+            this.onErrorCallback(err);
+          } catch {
+            // Ignora erro no callback
+          }
+        }
+        throw err;
+      } finally {
+        if (this.activeOperation === opPromise) {
           this.activeOperation = null;
         }
-      });
-      return promise;
+      }
+    };
+
+    if (!this.activeOperation) {
+      opPromise = wrappedOp();
+      this.activeOperation = opPromise;
+      return opPromise;
     }
 
-    const run = () => op();
-    const queued = this.activeOperation.then(run, run);
-    this.activeOperation = queued;
-    queued.finally(() => {
-      if (this.activeOperation === queued) {
-        this.activeOperation = null;
-      }
-    });
-    return queued;
+    const run = () => wrappedOp();
+    opPromise = this.activeOperation.then(run, run);
+    this.activeOperation = opPromise;
+    return opPromise;
+  }
+
+  public setOnError(callback: (error: unknown) => void): void {
+    this.onErrorCallback = callback;
   }
 
   public setOnIncidentPending(callback: (incident: StoredIncident) => void): void {

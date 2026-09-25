@@ -193,4 +193,61 @@ describe('Lote 2 — Capturadores Individuais', () => {
 
     capturer.stop();
   });
+
+  it('ErrorCapturer não emite unhandledrejection nem propaga erro se incidentManager.trigger falhar', async () => {
+    const unhandledSpy = vi.fn();
+    window.addEventListener('unhandledrejection', unhandledSpy);
+
+    // Força o trigger a falhar
+    vi.spyOn(incidentMgr, 'trigger').mockRejectedValue(new Error('IndexedDB transaction failed'));
+
+    const capturer = new ErrorCapturer(writer, incidentMgr, nextSeq);
+    capturer.start();
+
+    // Dispara erro global no window
+    window.dispatchEvent(
+      new ErrorEvent('error', {
+        message: 'Simulated app error',
+        filename: 'app.js',
+        lineno: 10,
+        colno: 2
+      })
+    );
+
+    // Aguarda microtasks
+    await new Promise((r) => setTimeout(r, 50));
+
+    // A falha interna do trigger não deve gerar unhandledrejection
+    expect(unhandledSpy).not.toHaveBeenCalled();
+
+    window.removeEventListener('unhandledrejection', unhandledSpy);
+    capturer.stop();
+  });
+
+  it('NetworkCapturer não propaga erro nem emite unhandledrejection se incidentManager.trigger falhar', async () => {
+    const unhandledSpy = vi.fn();
+    window.addEventListener('unhandledrejection', unhandledSpy);
+
+    vi.spyOn(incidentMgr, 'trigger').mockRejectedValue(new Error('IndexedDB quota failed'));
+
+    const originalFetch = vi.fn().mockResolvedValue(
+      new Response(null, { status: 500, statusText: 'Internal Server Error' })
+    );
+    (window as unknown as { fetch: typeof fetch }).fetch = originalFetch;
+
+    const capturer = new NetworkCapturer(writer, incidentMgr, nextSeq, {
+      captureHttpStatus: [500]
+    });
+    capturer.start();
+
+    // Fetch não deve rejeitar devido à falha interna do trigger do recorder
+    const res = await window.fetch('https://api.uticket.com.br/fail');
+    expect(res.status).toBe(500);
+
+    await new Promise((r) => setTimeout(r, 50));
+    expect(unhandledSpy).not.toHaveBeenCalled();
+
+    window.removeEventListener('unhandledrejection', unhandledSpy);
+    capturer.stop();
+  });
 });
